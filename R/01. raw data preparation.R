@@ -15,13 +15,12 @@ load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_f
 ch_calls <- read_csv(paste0(
   here::here(),
   "/data/raw data",
-  "/Ovarian_sample_list_with_Avatarkey_with_histology.csv"))
+  "/Ovarian_sample_list_with_Avatarkey_with_histology_05072025.csv"))
 
 
 ################################################################################# II ### Data cleaning
 # CH calle----
 ch_calls <- ch_calls %>%
-  select(-...1) %>% 
   rename(AvatarKey = ORIENAvatarKey) #%>%
   # mutate(ch_status = c(rep(c("No CH", "CH"), 285), "No CH"),
   #        ch_status = factor(ch_status, levels = c("No CH", 
@@ -323,11 +322,11 @@ Medications1 <- Medications %>%
   ungroup() %>% 
   rename(regimen = Medication)
 
-write_rds(Medications1,
-          paste0(here::here(), 
-                 "/data/processed data",
-                 "/Medication long format_",
-                 today(), ".rds"))
+# write_rds(Medications1,
+#           paste0(here::here(), 
+#                  "/data/processed data",
+#                  "/Medication long format_",
+#                  today(), ".rds"))
 
 Medications1 <- Medications1 %>% 
   full_join(., ch_calls %>% 
@@ -357,11 +356,11 @@ Medications <- dcast(setDT(Medications1),
   mutate(has_medication_data = "Yes")
 
 # rm(Medications1, Medications2)
-write_rds(Medications,
-          paste0(here::here(), 
-                 "/data/processed data",
-                 "/Medication wide format_",
-                 today(), ".rds"))
+# write_rds(Medications,
+#           paste0(here::here(), 
+#                  "/data/processed data",
+#                  "/Medication wide format_",
+#                  today(), ".rds"))
 
 # sct----
 StemCellTransplant1 <- StemCellTransplant %>%

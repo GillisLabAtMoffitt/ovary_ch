@@ -1,0 +1,301 @@
+---
+title: "Investigate-patients-with-ovarian-samples"
+author: "Christelle Colin-Leitzinger"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    theme: united
+    highlight: pygments
+    df_print: paged
+    code_folding: hide
+  word_document:
+    toc: true
+editor_options:
+  chunk_output_type: console
+---
+
+<style type= "text/css">
+
+. figure {
+   margin-top: 25px;
+   margin-bottom: 100px;
+}
+
+table {
+    margin-top: 10px;
+    margin-bottom: 25px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      cache = FALSE,
+                      fig.align='center'
+                      )
+```
+
+```{r library}
+library(here)
+library(tidyverse)
+library(gtsummary)
+library(labelled)
+library(survival)
+library(survminer)
+theme_set(theme_classic())
+theme_gtsummary_compact()
+```
+
+```{r load}
+gyn_data <-
+  read_rds(paste0(here(), 
+                  "/data/processed data",
+                  "/ORIEN_data_with_ovarian_sample2025-05-07.rds")) %>% 
+  janitor::clean_names()
+```
+
+We have `r nrow(gyn_data)` patients with germline and tumor samples coolected in "GYN - Ovarian Cancer" disease type.
+
+# Disease and histology
+These are characteristics listed in the sequencing sample data.    
+Some samples are not collected in the ovary. I talked with Yi-Han then Nancy. Yi-Han updated her samples selection filters to include ovary samples as first choice when available.
+```{r}
+gyn_data %>% 
+  select(disease_type, tumor_specimen_site_of_collection, histology_behavior
+         ) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Disease characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+# Let's clean primary cancer first
+## Cancer characteristics before primary cancer filtering
+You can see that 18 patients had a primary diagnosis of breast cancer and 12 of them had a subsequent diagnosis of ovarian cancer.    
+I can extract the histology of the subsequent diagnosis of ovarian cancer if we want to include them.
+```{r}
+gyn_data %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  mutate(primary_diagnosis_site = forcats::fct_infreq(primary_diagnosis_site)) %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  select(disease_type, 
+         histology, 
+         primary_diagnosis_site, 
+         
+         has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
+         
+         primary_diagnosis_site_code,
+         clin_group_stage, other_staging_system, other_staging_value, 
+         ecog, karnofsky) %>% 
+  tbl_summary(by = primary_diagnosis_site,
+              sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Cancer characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}") %>% 
+  modify_spanning_header(everything() ~ "Primary Diagnosis Site")
+```
+<br>
+
+```{r clean primary site, echo = TRUE, class.source= 'fold-hide'}
+gyn_data <- gyn_data %>%
+  filter(primary_diagnosis_site %in% c(
+    "Ovary", "Fallopian tube", "Peritoneum, NOS", "Specified parts of peritoneum"
+  ))
+```
+
+## Cancer characteristics after primary cancer filtering
+
+We now have `r nrow(gyn_data)` patients after filtering for Primary diagnosis site.
+
+```{r}
+gyn_data %>% 
+  select(disease_type, tumor_specimen_site_of_collection#, histology_behavior
+         ) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Disease characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+```{r}
+gyn_data %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  mutate(primary_diagnosis_site = forcats::fct_infreq(primary_diagnosis_site)) %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  select(disease_type, 
+         histology, 
+         primary_diagnosis_site, 
+         
+         has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
+         
+         primary_diagnosis_site_code,
+         clin_group_stage, other_staging_system, other_staging_value, 
+         ecog, karnofsky) %>% 
+  tbl_summary(by = primary_diagnosis_site,
+              sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Cancer characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}") %>% 
+  modify_spanning_header(everything() ~ "Primary Diagnosis Site")
+```
+<br>
+
+## Let's now claen for histology behavior
+```{r clean histology, echo = TRUE, class.source= 'fold-hide'}
+gyn_data <- gyn_data %>%
+  filter(histology_behavior %in% c(
+    "84413 Serous cystadenocarcinoma, NOS", "83803 Endometrioid adenocarcinoma, NOS",
+    "81403 Adenocarcinoma, NOS", "83103 Clear cell adenocarcinoma, NOS",
+    "84413 Serous carcinoma, NOS", "84603 Papillary serous cystadenocarcinoma",
+    "84613 Serous surface papillary carcinoma", "80103 Carcinoma, NOS",
+    "89803 Carcinosarcoma, NOS", "83233 Mixed cell adenocarcinoma",
+    "84603 Low grade serous carcinoma", "84803 Mucinous adenocarcinoma",
+    "84703 Mucinous cystadenocarcinoma, NOS", "89503 Mullerian mixed tumor",
+    "82603 Papillary adenocarcinoma, NOS", "80703 Squamous cell carcinoma, NOS",
+    "81203 Transitional cell carcinoma, NOS", "84503 Papillary cystadenocarcinoma, NOS",
+    "80213 Carcinoma, anaplastic, NOS", "84613 High grade serous carcinoma",
+    "84806 Pseudomyxoma peritonei"
+  ))
+
+
+
+```
+We now have `r nrow(gyn_data)` patients after filtering for histology behavior.
+
+```{r}
+gyn_data %>% 
+  select(disease_type, tumor_specimen_site_of_collection#, histology_behavior
+         ) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Disease characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+```{r}
+gyn_data %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  mutate(primary_diagnosis_site = forcats::fct_infreq(primary_diagnosis_site)) %>% 
+  # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+  select(disease_type, 
+         histology, 
+         primary_diagnosis_site, 
+         
+         has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
+         
+         primary_diagnosis_site_code,
+         clin_group_stage, other_staging_system, other_staging_value, 
+         ecog, karnofsky) %>% 
+  tbl_summary(by = primary_diagnosis_site,
+              sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Cancer characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}") %>% 
+  modify_spanning_header(everything() ~ "Primary Diagnosis Site")
+```
+<br>
+
+
+# Patient characteristics
+I have age at medication and age at surgery-biopsy so I should be able to categorize Neoadjuvant and Adjuvant therapies.
+```{r}
+gyn_data %>% 
+  select(age_at_diagnosis, sex, race, ethnicity,
+         bmi, bmi_cat,
+         smoking_status,
+         vital_status,
+         
+         drugs_ever, age_at_med_start_1,
+         surgery_ever, age_at_surgery_biopsy,
+         os_event, os_time_from_treatment_years, 
+         pfs_event, pfs_time_from_treatment_years
+         ) %>% 
+  tbl_summary(
+              sort = list(all_categorical() ~ "frequency")) %>%
+  bold_labels() %>%
+  add_stat_label() %>%
+  modify_header(label ~ "**Patient characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+# Tumor markers
+I need to look more at these markers
+```{r}
+gyn_data %>% 
+  select(fish_t_4_14 : hpv_63) %>% 
+  purrr::keep(~!all(is.na(.))) %>%
+  tbl_summary() %>%
+  bold_labels() %>%
+  # add_stat_label() %>%
+  modify_header(label ~ "**Tumor markers and cytogenetics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+# Medications before germline
+```{r}
+gyn_data %>% 
+  select(drugs_ever) %>% 
+  tbl_summary() %>%
+  bold_labels()
+
+gyn_data %>% 
+  filter(drugs_ever == "Yes") %>% 
+  select(avatar_key, starts_with("regimen")) %>% 
+  pivot_longer(cols = -avatar_key,
+               values_to = "drug_name",
+               values_drop_na = TRUE) %>% 
+  group_by(avatar_key) %>% 
+  mutate(number_of_regimen = n()) %>% 
+  ungroup() %>% 
+  distinct(avatar_key, .keep_all = TRUE) %>% 
+  select(number_of_regimen) %>% 
+  tbl_summary(type = list(number_of_regimen ~ "categorical")) %>%
+  bold_labels()
+
+gyn_data %>% 
+  filter(drugs_ever == "Yes") %>% 
+  select(avatar_key, starts_with("regimen")) %>% 
+  pivot_longer(cols = -avatar_key, 
+               values_to = "drug_name",
+               values_drop_na = TRUE) %>% 
+  select(drug_name) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels()
+
+gyn_data %>% 
+  filter(drugs_ever == "Yes") %>% 
+  select(avatar_key, starts_with("regimen")) %>% 
+  pivot_longer(cols = -avatar_key, 
+               values_to = "drug_name",
+               values_drop_na = TRUE) %>% 
+  mutate(received_carboplatin = case_when(
+    str_detect(drug_name, "Carboplatin")        ~ "Yes"
+  )) %>% 
+  group_by(avatar_key) %>% 
+  fill(received_carboplatin, .direction = "updown") %>% 
+  ungroup() %>% 
+  distinct(avatar_key, .keep_all = TRUE) %>% 
+  mutate(received_carboplatin = str_replace_na(received_carboplatin, "No")) %>% 
+  select(received_carboplatin) %>% 
+  tbl_summary() %>%
+  bold_labels()
+```
+
+
+
+
+
