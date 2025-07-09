@@ -54,11 +54,18 @@ theme_gtsummary_compact()
 gyn_data <-
   read_rds(paste0(here(), 
                   "/data/processed data",
-                  "/ORIEN_data_with_ovarian_sample2025-05-07.rds")) %>% 
-  janitor::clean_names()
+                  "/ORIEN_data_with_ovarian_sample2025-07-08.rds")) %>% 
+  janitor::clean_names() %>% 
+  mutate(ch_status = factor(ch_status, levels = c("No CH", "CH")))
+
+path_raw <- fs::path("", "Volumes", "Lab_Gillis",
+                     "ORIEN_Avatar", "resources")
+load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_files.RData")
 ```
 
 We have `r nrow(gyn_data)` patients with germline and tumor samples coolected in "GYN - Ovarian Cancer" disease type.
+
+
 
 # Disease and histology
 These are characteristics listed in the sequencing sample data.    
@@ -90,9 +97,7 @@ gyn_data %>%
          
          has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
          
-         primary_diagnosis_site_code,
-         clin_group_stage, other_staging_system, other_staging_value, 
-         ecog, karnofsky) %>% 
+         primary_diagnosis_site_code) %>% 
   tbl_summary(by = primary_diagnosis_site,
               sort = list(everything() ~ "frequency")) %>%
   bold_labels() %>%
@@ -103,7 +108,7 @@ gyn_data %>%
 ```
 <br>
 
-```{r clean primary site, echo = TRUE, class.source= 'fold-hide'}
+```{r clean primary site, echo = TRUE, class.source= 'fold-show'}
 gyn_data <- gyn_data %>%
   filter(primary_diagnosis_site %in% c(
     "Ovary", "Fallopian tube", "Peritoneum, NOS", "Specified parts of peritoneum"
@@ -137,9 +142,7 @@ gyn_data %>%
          
          has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
          
-         primary_diagnosis_site_code,
-         clin_group_stage, other_staging_system, other_staging_value, 
-         ecog, karnofsky) %>% 
+         primary_diagnosis_site_code) %>% 
   tbl_summary(by = primary_diagnosis_site,
               sort = list(everything() ~ "frequency")) %>%
   bold_labels() %>%
@@ -150,8 +153,25 @@ gyn_data %>%
 ```
 <br>
 
-## Let's now claen for histology behavior
-```{r clean histology, echo = TRUE, class.source= 'fold-hide'}
+## Let's now clean for histology behavior
+
+What is the good histology to use?    
+histology_behavior is from the sequencing data and histology is from the Diagnosis file which I guess is more clinical.
+```{r}
+gyn_data %>%
+  mutate(histology_behavior_sequencing = str_match(histology_behavior, "([:digit:]*) (.*)")[,3]) %>% 
+  mutate(diff = case_when(
+    histology_behavior_sequencing == histology       ~ "Same",
+    TRUE                                             ~ "Diff"
+  )) %>% 
+  filter(diff == "Diff") %>% 
+  select(histology_behavior_sequencing, histology)
+  
+# str_match(gyn_data$histology_behavior, "([:digit:]*) (.*)")
+```
+
+
+```{r clean histology, echo = TRUE, class.source= 'fold-show'}
 gyn_data <- gyn_data %>%
   filter(histology_behavior %in% c(
     "84413 Serous cystadenocarcinoma, NOS", "83803 Endometrioid adenocarcinoma, NOS",
@@ -195,9 +215,7 @@ gyn_data %>%
          
          has_subsequent_cancer, subsequent_cancer_primary_diagnosis_site, 
          
-         primary_diagnosis_site_code,
-         clin_group_stage, other_staging_system, other_staging_value, 
-         ecog, karnofsky) %>% 
+         primary_diagnosis_site_code) %>% 
   tbl_summary(by = primary_diagnosis_site,
               sort = list(everything() ~ "frequency")) %>%
   bold_labels() %>%
@@ -206,52 +224,98 @@ gyn_data %>%
                 all_stat_cols() ~ "**{level}**, N = {n}") %>% 
   modify_spanning_header(everything() ~ "Primary Diagnosis Site")
 ```
+
+
 <br>
 
 
 # Patient characteristics
-I have age at medication and age at surgery-biopsy so I should be able to categorize Neoadjuvant and Adjuvant therapies.
+BMI is selected to be the closest to Dx (before or after). 
+But in case of ovarian cancer for which patient often receive surgery, should I take only BMI before Dx.
+Or make a rule depending if patient received surgery?
 ```{r}
 gyn_data %>% 
   select(age_at_diagnosis, sex, race, ethnicity,
+         race_eth,
+         clin_group_stage, other_staging_system, other_staging_value, 
+         ecog, karnofsky,
          bmi, bmi_cat,
          smoking_status,
          vital_status,
-         
+         not_real_age, #not_real_sequencing_age,
          drugs_ever, age_at_med_start_1,
-         surgery_ever, age_at_surgery_biopsy,
+         surgery_ever, age_at_first_surgerybiopsy,
+         time_dx_to_first_treatment,
          os_event, os_time_from_treatment_years, 
-         pfs_event, pfs_time_from_treatment_years
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
          ) %>% 
-  tbl_summary(
+  tbl_summary(by = ch_status,
               sort = list(all_categorical() ~ "frequency")) %>%
   bold_labels() %>%
-  add_stat_label() %>%
+  add_p() %>% bold_p(t=0.05) %>% add_overall() %>% 
+  # add_stat_label() %>%
   modify_header(label ~ "**Patient characteristics**",
                 all_stat_cols() ~ "**{level}**, N = {n}")
 ```
 <br>
 
-# Tumor markers
-I need to look more at these markers
+# Treatment
+Should we make a rule to exclude treatment that would have happen before ovarian cancer diagnosis?
+
+## Surgery
+I linked the surgery to the Ovary diagnosis.    
+FYI there are some SiteTherapeutic == "Unknown/Not Applicable". For these we used to code surgery ever "Yes" if we have a age related to this surgery and "No" if there was no age associated     
+Also there is some surgery/biopy with PrimaryDiagnosisSite == "Unknown/Not Applicable" so i cannot merge them to a specific cancer diagnosis.
+The choice we made a long time ago was to take the first surgery with the correct PrimaryDiagnosisSite and if none to select the first surgery with unknown primary site.
+We could also create a rule for a specific location in case of unknown PrimaryDiagnosisSite.    
+For surgery, there is variables called SiteDiagnostic, SiteTherapeutic, SitePalliative. 
+I think this is where we can understand if "Yes" surgery-biopsy is an actual surgery or a biopsy. 
+What do you think? Should we add the SiteTherapeutic == "Yes" filter?     
+
+
+```{r}
+SurgeryBiopsy %>%
+  # For the patients with no diagnosis site
+  filter(PrimaryDiagnosisSite == "Unknown/Not Applicable") %>% 
+  select(SurgeryBiopsyLocation, SiteDiagnostic, surgery_ever = SiteTherapeutic, SitePalliative,
+         MethodCoreBiopsyTissue, MethodCoreBiopsyLymphNode, MethodSurgicalResection,
+         MethodSentinelLymphNode, MethodSurgeryNOS, MethodOther, )
+```
+This is what I have for now but this will change depending of the new cleaning steps.
 ```{r}
 gyn_data %>% 
-  select(fish_t_4_14 : hpv_63) %>% 
-  purrr::keep(~!all(is.na(.))) %>%
-  tbl_summary() %>%
+  select(age_at_first_surgerybiopsy, has_surgery_data,
+         surgerybiopsy_ever, 
+         surg_primary_diagnosis_site,
+         surgery_ever,
+         ch_status) %>%
+  tbl_summary(by = ch_status) %>%
   bold_labels() %>%
-  # add_stat_label() %>%
-  modify_header(label ~ "**Tumor markers and cytogenetics**",
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>% 
+  modify_header(label ~ "**Surgery**",
                 all_stat_cols() ~ "**{level}**, N = {n}")
 ```
 
-# Medications before germline
+## Medication
+Do we care about the mediacation which was received before germline?    
+We didn't linked the mediacation to the Ovary diagnosis for these (probably think that most drugs have an antineoplastic effect on the whole physiologie.    
+FYI there are also some SiteTherapeutic == "Unknown/Not Applicable". Previously we included all the medication received before germline.   
+I recreated the regimen by same start age.   
 ```{r}
 gyn_data %>% 
-  select(drugs_ever) %>% 
-  tbl_summary() %>%
-  bold_labels()
+  select(age_at_med_start_1, has_medication_data,
+         drugs_ever, 
+         regimen_1, ch_status) %>%
+  tbl_summary(by = ch_status) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>% 
+  modify_header(label ~ "**Medication**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
 
+### Medications after germline
+```{r}
 gyn_data %>% 
   filter(drugs_ever == "Yes") %>% 
   select(avatar_key, starts_with("regimen")) %>% 
@@ -278,8 +342,8 @@ gyn_data %>%
 
 gyn_data %>% 
   filter(drugs_ever == "Yes") %>% 
-  select(avatar_key, starts_with("regimen")) %>% 
-  pivot_longer(cols = -avatar_key, 
+  select(avatar_key, starts_with("regimen"), ch_status) %>% 
+  pivot_longer(cols = -c(avatar_key, ch_status), 
                values_to = "drug_name",
                values_drop_na = TRUE) %>% 
   mutate(received_carboplatin = case_when(
@@ -290,12 +354,175 @@ gyn_data %>%
   ungroup() %>% 
   distinct(avatar_key, .keep_all = TRUE) %>% 
   mutate(received_carboplatin = str_replace_na(received_carboplatin, "No")) %>% 
-  select(received_carboplatin) %>% 
-  tbl_summary() %>%
-  bold_labels()
+  select(received_carboplatin, ch_status) %>% 
+  tbl_summary(by = ch_status) %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall()
 ```
 
 
+
+
+
+## Radiation
+I don't think we are interested by radiation?
+```{r}
+gyn_data %>% 
+  select(age_at_first_radiation, has_radiation_data,
+         radiation_ever,
+         ch_status) %>%
+  tbl_summary(by = ch_status) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>% 
+  modify_header(label ~ "**Radiation**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+## SCT
+No SCT
+```{r}
+gyn_data %>% 
+  select(age_at_first_sct, has_sct_data,
+         sct_ever,
+         ch_status) %>%
+  tbl_summary(by = ch_status) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>% 
+  modify_header(label ~ "**SCT**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+
+# Tumor markers
+I need to look more at these markers
+```{r}
+gyn_data %>% 
+  select(fish_t_4_14 : hpv_63) %>% 
+  purrr::keep(~!all(is.na(.))) %>%
+  tbl_summary() %>%
+  bold_labels() %>%
+  # add_stat_label() %>%
+  modify_header(label ~ "**Tumor markers and germline_collection_age**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+# Survival
+
+For PFS I have "Progression" and "Recurrence", both are coded as event = 1.   
+I linked the outcomes info by cancer diagnosis so I should have only the progression/recurrence for ovarian cancer.   
+FYI, some are with OutcomesPrimaryDiagnosisSite == "Unknown/Not Applicable" so i cannot merge them to a specific cancer diagnosis.
+Same choice was made as for surgery: select the info with correct PrimaryDiagnosisSite and if none select the first outcome with unknown primary site.
+ 
+```{r}
+gyn_data %>% select(pfs_time_from_treatment_years) %>% arrange(pfs_time_from_treatment_years)
+gyn_data %>% select(os_time_from_treatment_years) %>% arrange(os_time_from_treatment_years)
+gyn_data %>% 
+  select(vital_status,
+         has_os_data,
+         os_event, os_time_from_treatment_years, 
+         has_outcomes_data, 
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
+         ) %>% 
+  tbl_summary(by = ch_status,
+              sort = list(all_categorical() ~ "frequency")) %>%
+  bold_labels() %>% 
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>% 
+  modify_header(label ~ "**Survival**")
+```
+
+## HR - Univariable only - need better cleaning of the factors included for multivariable analysis
+```{r}
+tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = os_time_from_treatment_years, event = os_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", "race_eth",
+              "clin_group_stage", "histology",
+              "bmi_cat"),
+  # pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>% 
+  modify_spanning_header(everything() ~ "**OS**")
+
+# coxph(Surv(time = gyn_data$os_time_from_treatment_years, 
+#                    event = gyn_data$os_event) ~ ch_status + germline_collection_age + race_eth +
+#         clin_group_stage + histology + bmi_cat, 
+#               data = gyn_data)  %>% 
+#   tbl_regression(exponentiate = TRUE) %>% 
+#   bold_p(t = .05) %>% 
+#   add_nevent(location = "level") %>% add_n(location = "level") %>% 
+#   modify_spanning_header(everything() ~ "**OS**")
+
+tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = pfs_time_from_treatment_years, event = pfs_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", "race_eth",
+              "clin_group_stage", "histology",
+              "bmi_cat"),
+  # pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>% 
+  modify_spanning_header(everything() ~ "**PFS**")
+
+# coxph(Surv(time = gyn_data$pfs_time_from_treatment_years, 
+#                    event = gyn_data$pfs_event) ~ ch_status + germline_collection_age + race_eth +
+#         clin_group_stage + histology + bmi_cat, 
+#               data = gyn_data)  %>% 
+#   tbl_regression(exponentiate = TRUE) %>% 
+#   bold_p(t = .05) %>% 
+#   add_nevent(location = "level") %>% add_n(location = "level") %>% 
+#   modify_spanning_header(everything() ~ "**PFS**")
+```
+
+## KM
+```{r}
+ggsurvplot(survfit(Surv(os_time_from_treatment_years, os_event) ~ ch_status, 
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "OS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+
+ggsurvplot(survfit(Surv(pfs_time_from_treatment_years, pfs_event) ~ ch_status, 
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "PSS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+```
 
 
 
