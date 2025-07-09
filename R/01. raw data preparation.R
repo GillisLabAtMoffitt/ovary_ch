@@ -4,7 +4,8 @@ library(lubridate)
 
 
 ################################################################################# I ### Load data
-# path <- fs::path("", "Volumes", "Lab_Gillis","ORIEN_Avatar", "resources")
+path_raw <- fs::path("", "Volumes", "Lab_Gillis",
+                     "ORIEN_Avatar", "resources")
 load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_files.RData")
 
 # The cleaning and merging steps are in the ch_orien project
@@ -15,13 +16,14 @@ load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_f
 ch_calls <- read_csv(paste0(
   here::here(),
   "/data/raw data",
-  "/Ovarian_sample_list_with_Avatarkey_with_histology_05072025.csv"))
+  "/Ovarian_sample_list_with_CH_status_06.24.2025.csv"))
 
 
 ################################################################################# II ### Data cleaning
 # CH calle----
 ch_calls <- ch_calls %>%
-  rename(AvatarKey = ORIENAvatarKey) #%>%
+  rename(AvatarKey = ORIENAvatarKey) %>%
+  select(-`...1`)
   # mutate(ch_status = c(rep(c("No CH", "CH"), 285), "No CH"),
   #        ch_status = factor(ch_status, levels = c("No CH", 
   #                                                 "CH")))
@@ -30,6 +32,10 @@ ch_calls <- ch_calls %>%
 TumorSequencing <- TumorSequencing %>%
   filter(TumorSequencingInd == "Yes") %>%
   select(AvatarKey, AgeAtTumorSequencing) %>%
+  mutate(not_real_sequencing_age = case_when(
+    AgeAtTumorSequencing == "Age 90 or older"   
+                                          ~ "Age 90 or older"
+  )) %>%
   mutate(across(c("AgeAtTumorSequencing"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
@@ -87,7 +93,7 @@ CytogeneticAbnormalities <-
               values_from = CytogenAbnormInd)
 
 
-# demo cleaning}
+# demo ----
 table(PatientMaster$Race)
 table(PatientMaster$Ethnicity)
 
@@ -111,7 +117,7 @@ demographics <- PatientMaster %>%
       Race == "Pacific Islander, NOS" |
       Race == "Polynesian, NOS" |
       Race == "Samoan" |
-      Race == "Tongan ese"                     ~ "Native Hawaiian or Other Pacific Islander",
+      str_detect(Race, "Tongan")               ~ "Native Hawaiian or Other Pacific Islander",
     str_detect(Race, "Unknown")                ~ "Unknown",
     Race == "Other"                            ~ "Unknown",
     TRUE                                       ~ Race
@@ -120,20 +126,22 @@ demographics <- PatientMaster %>%
     Ethnicity == "Spanish surname only"        ~ "Non-Hispanic",
     str_detect(Ethnicity, "Non-Hispanic")      ~ "Non-Hispanic",
     str_detect(Ethnicity, "Unknown")           ~ "Unknown",
-    TRUE                                       ~ "Hispanic"
+    !is.na(Ethnicity)                          ~ "Hispanic",
+    TRUE                                       ~ Ethnicity
   )) %>%
   mutate(race_eth = case_when(
     Race == "White" &
       Ethnicity == "Non-Hispanic"              ~ "White Non-Hispanic",
     Race == "Black" &
-      Ethnicity == "Non-Hispanic"              ~ "Black",
+      Ethnicity == "Non-Hispanic"              ~ "Black Non-Hispanic",
     Race == "Others" &
       Ethnicity == "Non-Hispanic"              ~ "Others Non-Hispanic",
-    Ethnicity == "Hispanic"                    ~ "Hispanic"
-  ))%>% 
-  mutate(Race = factor(Race, levels = c("White", "Black", "Asian",
-                                        "American Indian or Alaska Native", "Native Hawaiian or Other Pacific Islander",
-                                        "Unknown")))
+    Ethnicity == "Hispanic"                    ~ "Hispanic any race"
+  )) #%>% 
+  # mutate(Race = factor(Race, levels = c("White", "Black", "Asian",
+  #                                       "American Indian or Alaska Native", 
+  #                                       "Native Hawaiian or Other Pacific Islander",
+  #                                       "Unknown")))
 
 rm(PatientMaster)
 
@@ -160,6 +168,9 @@ Diagnosis <- Diagnosis %>%
          CurrentlySeenForPrimaryOrRecurr,
          PerformStatusAtDiagnosis, 
          OtherStagingSystem, OtherStagingValue) %>%
+  mutate(not_real_age = case_when(
+    AgeAtDiagnosis == "Age 90 or older"   ~ "Age 90 or older"
+  )) %>%
   mutate(across(c("AgeAtDiagnosis"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
@@ -211,7 +222,8 @@ VitalStatus <- VitalStatus %>%
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
-  )))
+  ))) %>%
+  mutate(has_os_data = "Yes")
 
 
 # outcomes
@@ -382,15 +394,16 @@ StemCellTransplant <- StemCellTransplant1 %>%
   # bind the data with a primary site known as first diagnosis
   # then the one without which show some No Metastasis
   bind_rows(., StemCellTransplant2) %>%
-  select(AvatarKey, sct_ever = SCTInd, AgeAtTransplant,
+  select(AvatarKey, sct_ever = SCTInd, 
+         age_at_first_sct = AgeAtTransplant,
          TransplantType, TransplantCellSource) %>%
-  mutate(across(c("AgeAtTransplant"), ~ case_when(
+  mutate(across(c("age_at_first_sct"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
   ))) %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
-  mutate(has_stemcell_data = "Yes")
+  mutate(has_sct_data = "Yes")
 
 rm(StemCellTransplant1, StemCellTransplant2)
 
@@ -419,8 +432,9 @@ Radiation <- Radiation1 %>%
   # then the one without which show some No Metastasis
   bind_rows(., Radiation2) %>%
   select(AvatarKey, RadPrimaryDiagnosisSiteCode, RadPrimaryDiagnosisSite,
-         radiation_ever = RadiationTherapyInd, AgeAtRadiationStart) %>%
-  mutate(across(c("AgeAtRadiationStart"), ~ case_when(
+         radiation_ever = RadiationTherapyInd, 
+         age_at_first_radiation = AgeAtRadiationStart) %>%
+  mutate(across(c("age_at_first_radiation"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
@@ -431,7 +445,8 @@ Radiation <- Radiation1 %>%
 rm(Radiation1, Radiation2)
 
 
-# surgery}
+# surgery ---- 
+################################################################################################################# Done
 SurgeryBiopsy <- SurgeryBiopsy %>%
   filter(SurgeryBiopsyInd != "(Migrated) Cannot determine from available documentation")
 
@@ -456,8 +471,10 @@ SurgeryBiopsy <- SurgeryBiopsy1 %>%
   bind_rows(., SurgeryBiopsy2) %>%
   select(AvatarKey, SurgPrimaryDiagnosisSiteCode = PrimaryDiagnosisSiteCode,
          SurgPrimaryDiagnosisSite = PrimaryDiagnosisSite,
-         surgery_ever = SiteTherapeutic, AgeAtSurgeryBiopsy) %>%
-  mutate(across(c("AgeAtSurgeryBiopsy"), ~ case_when(
+         surgerybiopsy_ever = SurgeryBiopsyInd,
+         surgery_ever = SiteTherapeutic, 
+         age_at_first_surgerybiopsy = AgeAtSurgeryBiopsy) %>%
+  mutate(across(c("age_at_first_surgerybiopsy"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
@@ -465,9 +482,9 @@ SurgeryBiopsy <- SurgeryBiopsy1 %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   mutate(surgery_ever = case_when(
     surgery_ever == "Unknown/Not Applicable" &
-      !is.na(AgeAtSurgeryBiopsy)          ~ "Yes",
+      !is.na(age_at_first_surgerybiopsy)  ~ "Yes",
     surgery_ever == "Unknown/Not Applicable" &
-      is.na(AgeAtSurgeryBiopsy)           ~ "No",
+      is.na(age_at_first_surgerybiopsy)   ~ "No",
     TRUE                                  ~ surgery_ever
   )) %>%
   mutate(has_surgery_data = "Yes")
@@ -655,73 +672,74 @@ all_tumor_data <- all_tumor_data %>%
     AgeAtLastContact >= age_at_lab                  ~ "Yes",
     AgeAtLastContact < age_at_lab                   ~ "No"
   )) %>% 
-  mutate(AgeAtLastContact = case_when(
+  mutate(age_last_contact = case_when(
     is_agelastcontact_last_date == "Yes"            ~ AgeAtLastContact,
     is_agelastcontact_last_date == "No"             ~ age_at_lab
   )) %>% 
   # Age at first treatment
   mutate(first_treatment = case_when(
-    (AgeAtRadiationStart < AgeAtSurgeryBiopsy |
-       (is.na(AgeAtSurgeryBiopsy) &
-          !is.na(AgeAtRadiationStart))) &
+    (age_at_first_radiation < age_at_first_surgerybiopsy |
+       (is.na(age_at_first_surgerybiopsy) &
+          !is.na(age_at_first_radiation))) &
       
-      (AgeAtRadiationStart < AgeAtMedStart_1 |
+      (age_at_first_radiation < AgeAtMedStart_1 |
          (is.na(AgeAtMedStart_1) &
-            !is.na(AgeAtRadiationStart))) &
+            !is.na(age_at_first_radiation))) &
       
-      (AgeAtRadiationStart < AgeAtTransplant | 
-         (is.na(AgeAtTransplant) &
-            !is.na(AgeAtRadiationStart)))              ~ "Radiation",
+      (age_at_first_radiation < age_at_first_sct | 
+         (is.na(age_at_first_sct) &
+            !is.na(age_at_first_radiation)))              ~ "Radiation",
     
-    (AgeAtSurgeryBiopsy < AgeAtRadiationStart | 
-       (is.na(AgeAtRadiationStart) &
-          !is.na(AgeAtSurgeryBiopsy))) &
+    (age_at_first_surgerybiopsy < age_at_first_radiation | 
+       (is.na(age_at_first_radiation) &
+          !is.na(age_at_first_surgerybiopsy))) &
       
-      (AgeAtSurgeryBiopsy < AgeAtMedStart_1 |
+      (age_at_first_surgerybiopsy < AgeAtMedStart_1 |
          (is.na(AgeAtMedStart_1) &
-            !is.na(AgeAtSurgeryBiopsy))) &
+            !is.na(age_at_first_surgerybiopsy))) &
       
-      (AgeAtSurgeryBiopsy < AgeAtTransplant | 
-         (is.na(AgeAtTransplant) &
-            !is.na(AgeAtSurgeryBiopsy)))          ~ "Surgery",
+      (age_at_first_surgerybiopsy < age_at_first_sct | 
+         (is.na(age_at_first_sct) &
+            !is.na(age_at_first_surgerybiopsy)))          ~ "Surgery",
     
-    (AgeAtMedStart_1 < AgeAtRadiationStart | 
-       (is.na(AgeAtRadiationStart) &
+    (AgeAtMedStart_1 < age_at_first_radiation | 
+       (is.na(age_at_first_radiation) &
           !is.na(AgeAtMedStart_1))) &
       
-      (AgeAtMedStart_1 < AgeAtSurgeryBiopsy |
-         (is.na(AgeAtSurgeryBiopsy) &
+      (AgeAtMedStart_1 < age_at_first_surgerybiopsy |
+         (is.na(age_at_first_surgerybiopsy) &
             !is.na(AgeAtMedStart_1))) &
       
-      (AgeAtMedStart_1 < AgeAtTransplant | 
-         (is.na(AgeAtTransplant) &
+      (AgeAtMedStart_1 < age_at_first_sct | 
+         (is.na(age_at_first_sct) &
             !is.na(AgeAtMedStart_1)))             ~ "Drugs",
     
-    (AgeAtTransplant < AgeAtRadiationStart | 
-       (is.na(AgeAtRadiationStart) &
-          !is.na(AgeAtTransplant))) &
+    (age_at_first_sct < age_at_first_radiation | 
+       (is.na(age_at_first_radiation) &
+          !is.na(age_at_first_sct))) &
       
-      (AgeAtTransplant < AgeAtSurgeryBiopsy |
-         (is.na(AgeAtSurgeryBiopsy) &
-            !is.na(AgeAtTransplant))) &
+      (age_at_first_sct < age_at_first_surgerybiopsy |
+         (is.na(age_at_first_surgerybiopsy) &
+            !is.na(age_at_first_sct))) &
       
-      (AgeAtTransplant < AgeAtMedStart_1 |
+      (age_at_first_sct < AgeAtMedStart_1 |
          (is.na(AgeAtMedStart_1) &
-            !is.na(AgeAtTransplant)))             ~ "SCT"
+            !is.na(age_at_first_sct)))             ~ "SCT"
     
   )) %>% 
   mutate(age_at_first_treatment = case_when(
-    first_treatment == "Radiation"                  ~ AgeAtRadiationStart,
-    first_treatment == "Surgery"                    ~ AgeAtSurgeryBiopsy,
+    first_treatment == "Radiation"                  ~ age_at_first_radiation,
+    first_treatment == "Surgery"                    ~ age_at_first_surgerybiopsy,
     first_treatment == "Drugs"                      ~ AgeAtMedStart_1,
-    first_treatment == "SCT"                        ~ AgeAtTransplant,
+    first_treatment == "SCT"                        ~ age_at_first_sct,
   )) %>% 
   # OS
   mutate(os_event = case_when(
     VitalStatus == "Alive"                          ~ 0,
-    TRUE                                            ~ 1
+    VitalStatus == "Lost to follow-up"              ~ 0,
+    VitalStatus == "Dead"                           ~ 1
   )) %>% 
-  mutate(os_age = coalesce(AgeAtDeath, AgeAtLastContact)) %>% 
+  mutate(os_age = coalesce(AgeAtDeath, age_last_contact)) %>% 
   mutate(os_time_from_dx_years = os_age - AgeAtDiagnosis) %>% 
   mutate(os_time_from_treatment_years = os_age - age_at_first_treatment) %>% 
   # PFS
@@ -734,13 +752,14 @@ all_tumor_data <- all_tumor_data %>%
   mutate(pfs_time_from_dx_years = pfs_age - AgeAtDiagnosis) %>% 
   mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment) %>% 
   # Metastasis
-  mutate(pfs_event = case_when(
+  mutate(metastase_event = case_when(
     had_metastasis == "Yes"                         ~ 1,
-    is.na(had_metastasis)                           ~ 0
+    !is.na(has_metastasis_data)                     ~ 0
   )) %>% 
   mutate(met_age = coalesce(AgeAtMetastaticSite, AgeAtLastContact)) %>% 
   mutate(met_time_from_dx_years = met_age - AgeAtDiagnosis) %>% 
-  mutate(met_time_from_treatment_years = met_age - age_at_first_treatment)
+  mutate(met_time_from_treatment_years = met_age - age_at_first_treatment) %>% 
+  mutate(time_dx_to_first_treatment = age_at_first_treatment - AgeAtDiagnosis)
 
 
 # Save
@@ -794,3 +813,4 @@ write_rds(gyn_data,
 
 
 # End data cleaning
+
