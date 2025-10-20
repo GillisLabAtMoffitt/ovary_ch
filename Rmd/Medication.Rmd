@@ -1,0 +1,100 @@
+---
+title: "CH in Ovary"
+author: "Christelle Colin-Leitzinger"
+date: "`r Sys.Date()`"
+output:
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    theme: united
+    highlight: pygments
+    df_print: paged
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+
+<style type= "text/css">
+
+. figure {
+   margin-top: 25px;
+   margin-bottom: 100px;
+}
+
+table {
+    margin-top: 10px;
+    margin-bottom: 25px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      cache = FALSE,
+                      fig.align='center'
+                      )
+```
+
+```{r library}
+library(here)
+library(tidyverse)
+library(gtsummary)
+library(labelled)
+library(survival)
+library(survminer)
+theme_set(theme_classic())
+theme_gtsummary_compact()
+```
+
+```{r load}
+med_data <-
+  read_rds(paste0(here(), 
+                  "/data/processed data",
+                  "/All medication all cancer for ovarian patients_2025-09-10.rds"))
+```
+<br>
+
+# Check the non bolton drugs
+```{r}
+med_data %>% 
+  filter(is.na(general_drug_class)) %>% 
+  select(Medication) %>% 
+  tbl_summary(sort = everything() ~ "frequency")
+```
+
+# All drugs before blood
+```{r}
+med_data %>% 
+  filter(regimen_specimen_sequence == "regimen before germline") %>% 
+  select(Medication) %>% 
+  tbl_summary(sort = everything() ~ "frequency")
+```
+
+# All drugs by cancer
+```{r}
+med_data %>% 
+  filter(regimen_specimen_sequence == "regimen before germline") %>%
+  select(Medication, drug_sequence_vs_ovarian_drugs) %>% 
+  tbl_summary(by = drug_sequence_vs_ovarian_drugs,
+              sort = everything() ~ "frequency")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

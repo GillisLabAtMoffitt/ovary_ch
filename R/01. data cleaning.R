@@ -450,11 +450,11 @@ Medications_ <- Medications %>%
   filter(str_detect(AvatarKey, paste0(ch_calls$AvatarKey, collapse = "|"))) %>% 
   filter(MedicationInd != "(Migrated) Cannot determine from available documentation") %>%
   # Create unique rows for identifying each drug line
-  group_by(AvatarKey) %>% 
-  mutate(drug_row_id = "drug_row_id_00", .after = AvatarKey) %>% 
-  mutate(drug_row_id2 = (1000 + row_number()), .after = AvatarKey) %>% 
-  ungroup() %>% 
-  unite(drug_row_id, c(drug_row_id, drug_row_id2), sep = "", remove = TRUE) %>% 
+  # group_by(AvatarKey) %>% 
+  # mutate(drug_row_id = "drug_row_id_00", .after = AvatarKey) %>% 
+  # mutate(drug_row_id2 = (1000 + row_number()), .after = AvatarKey) %>% 
+  # ungroup() %>% 
+  # unite(drug_row_id, c(drug_row_id, drug_row_id2), sep = "", remove = TRUE) %>% 
   
 
 # Medications1 <- Medications %>%
@@ -464,7 +464,7 @@ Medications_ <- Medications %>%
 #              by = c("AvatarKey", "MedPrimaryDiagnosisSiteCode" = "PrimaryDiagnosisSiteCode",
 #                     "MedPrimaryDiagnosisSite" = "PrimaryDiagnosisSite"))
 # 
-# Medications2 <- Medications %>%
+# Chemotherapy_ukn_site <- Medications %>%
 #   # For the patients with no diagnosis site
 #   filter(MedPrimaryDiagnosisSite == "Unknown/Not Applicable") %>%
 #   arrange(AvatarKey, AgeAtMedStart)
@@ -472,7 +472,7 @@ Medications_ <- Medications %>%
 # Medications <- Medications1 %>%
 #   # bind the data with a primary site known as first diagnosis
 #   # then the one without which show some No Metastasis
-#   bind_rows(., Medications2) %>%
+#   bind_rows(., Chemotherapy_ukn_site) %>%
 #   group_by(AvatarKey) %>%
 #   mutate(n = dense_rank(MedPrimaryDiagnosisSiteCode), .after = MedPrimaryDiagnosisSiteCode) %>%
 #   ungroup() %>%
@@ -520,37 +520,17 @@ Medications_ <- Medications_ %>%
       TRUE                                        ~ Medication
     ))
   
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Medications_raw <- Medications_
-
-
-# Separate patient who didn't receive drugs
-Medications_never <- Medications_ %>% 
-  filter(MedicationInd == "No") %>% 
-  mutate(has_first_line = case_when(
-    MedicationInd == "No"                           ~ "no drug received"
-  ))
-
-# Separate patient who did receive drugs
-Medications_ <- Medications_ %>%
-  filter(!str_detect(AvatarKey, paste0(Medications_never$AvatarKey, collapse = "|"))) %>% 
-  # Some regimen is line unknown but with same age as a known line, use to fill it up
+# Now that the drug names are updated, I can join the data with the Bolton categories
+Medications_raw <- Medications_ %>% 
+  mutate(Medication = str_to_lower(Medication)) %>% 
+  left_join(., drug_class, by = c("Medication" = "drug_name")) %>% 
+  # and code an overall chemotherapy variable
+  mutate(received_chemotherapy = case_when(
+    !is.na(narrow_drug_class_cytotoxic_only)        ~ "Ever",
+    Medication == "chemo, nos"                      ~ "Ever"
+  ), .after = MedicationInd) %>% 
+  # There are regimen line are unknown 
+  # but some have the same age as other row for which the line is known, use to fill it up
   mutate(MedLineRegimen_temp = case_when(
     MedLineRegimen %in% c("Unknown/Not Applicable", 
                           "Unknown/Not Reported")    ~ NA_character_,
@@ -560,7 +540,36 @@ Medications_ <- Medications_ %>%
   fill(MedLineRegimen_temp, .direction = "updown") %>% 
   ungroup() %>% 
   mutate(MedLineRegimen = coalesce(MedLineRegimen_temp, MedLineRegimen)) %>% 
-  select(- MedLineRegimen_temp) %>% 
+  select(-c(MedReasonNoneGiven : MedPrimaryDiagnosisSite), 
+         everything(), MedReasonNoneGiven : MedPrimaryDiagnosisSite,
+         - MedLineRegimen_temp, ) %>% 
+  distinct()
+  
+# Separate patient who didn't receive drugs
+Medications_never <- Medications_raw %>% 
+  filter(MedicationInd == "No") %>% 
+  mutate(has_first_line = case_when(
+    MedicationInd == "No"                           ~ "never drug received"
+  ), .after = MedicationInd) %>% 
+  mutate(received_chemotherapy =  "Never", .after = MedicationInd)
+
+# Keep the other medication on the side
+Medications_non_chemo <- Medications_raw %>% 
+  filter(MedicationInd == "Yes" &
+           is.na(received_chemotherapy))
+
+# Start a clean Chemotherapy data
+Chemotherapy <- Medications_raw %>% 
+  filter(MedicationInd == "Yes" &
+           !is.na(received_chemotherapy))
+
+# Wide format Medications_non_chemo-------------
+Medications_non_chemo
+
+
+
+
+Chemotherapy <- Chemotherapy %>% 
   # Re-code Lines by taking into account the line and the age
   # this will help to rearrange the data properly instead of by age only
   mutate(regimen_line = case_when(
@@ -587,12 +596,35 @@ Medications_ <- Medications_ %>%
   mutate(linenumber_n = dense_rank(interaction(regimen_line, AgeAtMedStart)), .after = MedLineRegimen) %>% 
   ungroup() %>% 
   # For the case when age is NA (instead of using drop in dense_rank)
-  mutate(regimen_line = coalesce(linenumber_n, regimen_line)) %>% 
+  mutate(regimen_line = as.character(coalesce(linenumber_n, regimen_line))) %>% 
   select(-linenumber_n) %>% 
   arrange(AvatarKey, regimen_line, AgeAtMedStart)
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+
   
 # For the patient with a ovary diagnosis site
-Medications1 <- Medications_ %>%
+Chemotherapy_ovary <- Chemotherapy %>%
   inner_join(., Diagnosis2 %>%
                select(AvatarKey, PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite),
              by = c("AvatarKey", "MedPrimaryDiagnosisSiteCode" = "PrimaryDiagnosisSiteCode",
@@ -612,16 +644,16 @@ Medications1 <- Medications_ %>%
 # Medications1_no_missing <- Medications1 %>%
 #   filter(has_first_line == "has first lines")
 # there is 30 patients difference
-Medications1_missing <- Medications1 %>% 
+Chemotherapy_missing_site <- Chemotherapy_ovary %>% 
   filter(has_first_line == "no first lines")
 
 
 # Rescue first medications dates if no first line when patient only has 1 dx and 
 # a first medication info with unknown dx site
-Medications2 <- Medications_ %>%
+Chemotherapy_ukn_site <- Chemotherapy %>%
   # For the patients with no diagnosis site
   filter((str_detect(AvatarKey, 
-                      paste0(Medications1_missing$AvatarKey, collapse = "|")))) %>% 
+                      paste0(Chemotherapy_missing_site$AvatarKey, collapse = "|")))) %>% 
   filter(MedPrimaryDiagnosisSite == "Unknown/Not Applicable") %>%
   left_join(., Diagnosis2 %>% select(AvatarKey, number_of_dx), by = "AvatarKey") %>% 
   # Make sure we keep unknown only for patient that had only 1 dx
@@ -629,14 +661,14 @@ Medications2 <- Medications_ %>%
   filter(number_of_dx == 1) %>% 
   # arrange(AvatarKey, AgeAtMedStart) %>%
   select(-number_of_dx)
-Medications1 <- Medications1 %>% 
-  bind_rows(., Medications2) %>% 
+Chemotherapy_ovary <- Chemotherapy_ovary %>% 
+  bind_rows(., Chemotherapy_ukn_site) %>% 
   distinct()
 
-# Add Info for patients with no medication dx site but only has 1 dx
-Medications3 <- Medications_ %>%
+# Add Info for patients with no medication dx site ever but only has 1 dx
+Chemotherapy_ukn_site <- Chemotherapy %>%
   filter((!str_detect(AvatarKey, 
-                     paste0(Medications1$AvatarKey, collapse = "|")))) %>% 
+                     paste0(Chemotherapy_ovary$AvatarKey, collapse = "|")))) %>% 
   filter(MedPrimaryDiagnosisSite == "Unknown/Not Applicable") %>%
   left_join(., Diagnosis2 %>% select(AvatarKey, number_of_dx), by = "AvatarKey") %>% 
   # Make sure we keep unknown only for patient that had only 1 dx
@@ -645,8 +677,14 @@ Medications3 <- Medications_ %>%
   # arrange(AvatarKey, AgeAtMedStart) %>%
   select(-number_of_dx)
 
-Medications_clean <- bind_rows(Medications_never, Medications1, Medications3) %>% 
-  distinct() %>% 
+Chemotherapy <- bind_rows(Medications_never, Chemotherapy_ovary, Chemotherapy_ukn_site) %>% 
+  # There are 2 patients with a duplicate info due to abstraction
+  # group_by(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop) %>% 
+  # mutate(n = n(), .after = AvatarKey) %>% 
+  # ungroup() %>% 
+  # filter( n >1)
+  distinct(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop, .keep_all = TRUE) %>% 
+
   # Recode again all the regimen number after adding other unknown site
   # Some regimen is line unknown but with same age as a known line, use to fill it up
   mutate(MedLineRegimen_temp = case_when(
@@ -689,42 +727,35 @@ Medications_clean <- bind_rows(Medications_never, Medications1, Medications3) %>
   select(-linenumber_n) %>% 
   arrange(AvatarKey, regimen_line, AgeAtMedStart)
 
-# Add Bolton drug class
-Medications_clean <- Medications_clean %>% 
-  mutate(Medication = str_to_lower(Medication)) %>% 
-  left_join(., drug_class, by = c("Medication" = "drug_name"))  %>% # will need to fix some name like gemcitabine doxorubicin...
-  # mutate(received_carboplatin = case_when(
-  #   str_detect(Medication, "carboplatin")        ~ "Yes"
-  # )) %>% 
-  # mutate(received_taxane = case_when(
-  #   str_detect(Medication, "taxel")              ~ "Yes"
-  # )) %>% 
-  # mutate(received_bev = case_when(
-  #   str_detect(Medication, "bevacizumab")        ~ "Yes"
-  # ))
-  mutate(has_first_line = case_when(
-    (MedLineRegimen == "First Line/Regimen" |
-       MedLineRegimen == "Neoadjuvant Regimen")     ~ "has first line"
-  )) %>% 
-  group_by(AvatarKey) %>% 
-  fill(has_first_line, .direction = "updown") %>% 
-  ungroup() %>% 
-  mutate(has_first_line = case_when(
-    is.na(has_first_line)                           ~ "no first line",
-    TRUE                                            ~ has_first_line
-  )) 
+rm(Medications_never, Chemotherapy_ovary, Chemotherapy_ukn_site)
 
-# Create regimen
-Medications_long <- Medications_clean %>%
+
+# Add Bolton drug class
+Chemotherapy_clean <- Chemotherapy %>% 
+  # mutate(has_first_line = case_when(
+  #   (MedLineRegimen == "First Line/Regimen" |
+  #      MedLineRegimen == "Neoadjuvant Regimen")     ~ "has first line"
+  # )) %>% 
+  # group_by(AvatarKey) %>% 
+  # fill(has_first_line, .direction = "updown") %>% 
+  # ungroup() %>% 
+  # mutate(has_first_line = case_when(
+  #   is.na(has_first_line)                           ~ "no first line",
+  #   TRUE                                            ~ has_first_line
+  # )) %>% 
+  select(-has_first_line)
+
+# Create regimen - keep as "long" data
+Chemotherapy_long <- Chemotherapy_clean %>%
   group_by(AvatarKey, regimen_line, AgeAtMedStart, MedicationInd, AgeAtMedStop, 
-           ever_first_med_age, has_first_line#,
+           ever_first_med_age#, has_first_line#,
            # received_carboplatin, received_taxane, received_bev
            ) %>%
   summarise_at(vars(Medication, 
                     narrow_drug_class_cytotoxic_only, 
                     general_drug_class), str_c, collapse = "; ") %>%
   group_by(AvatarKey, regimen_line, AgeAtMedStart, MedicationInd, 
-           ever_first_med_age, has_first_line#,
+           ever_first_med_age#, has_first_line#,
            # received_carboplatin, received_taxane, received_bev
   ) %>%
   summarise_at(vars(Medication, 
@@ -732,36 +763,76 @@ Medications_long <- Medications_clean %>%
                     general_drug_class, 
                     AgeAtMedStop), str_c, collapse = "; ") %>%
   ungroup() %>% 
-  rename(regimen = Medication) %>% 
+  rename(regimen_drugs = Medication) %>% 
   arrange(AvatarKey, AgeAtMedStart)
 
 
-Medications_long <- Medications_long %>% 
-  full_join(., ch_calls %>% 
+Chemotherapy_long <- Chemotherapy_long %>% 
+  left_join(., ch_calls %>% 
               select(AvatarKey, germline_collection_age), 
             by = "AvatarKey") %>% 
   mutate(regimen_specimen_sequence = case_when(
     AgeAtMedStart <= germline_collection_age        ~ "regimen before germline",
     AgeAtMedStart > germline_collection_age         ~ "regimen after germline"
   )) %>% 
-  select(-c(germline_collection_age))
+  select(-c(germline_collection_age)) %>% 
+  mutate(received_carboplatin = case_when(
+    regimen_specimen_sequence ==
+      "regimen before germline" &
+      str_detect(regimen_drugs, "carboplatin")      ~ "Yes"
+  )) %>%
+  mutate(received_paclitaxel = case_when(
+    regimen_specimen_sequence ==
+      "regimen before germline" &
+      str_detect(regimen_drugs, "paclitaxel")       ~ "Yes"
+  )) %>%
+  mutate(received_bev = case_when(
+    regimen_specimen_sequence ==
+      "regimen before germline" &
+      str_detect(regimen_drugs, "bevacizumab")      ~ "Yes"
+  )) %>% 
+  mutate(received_any_platinum = case_when(
+    regimen_specimen_sequence ==
+      "regimen before germline" &
+      str_detect(narrow_drug_class_cytotoxic_only, 
+                 "platinum")                        ~ "Yes"
+  )) %>%
+  mutate(received_any_taxane = case_when(
+    regimen_specimen_sequence ==
+      "regimen before germline" &
+      str_detect(narrow_drug_class_cytotoxic_only, 
+                 "taxane")                          ~ "Yes"
+  )) %>%
+  group_by(AvatarKey) %>% 
+  fill(received_carboplatin, received_paclitaxel,
+       received_bev, 
+       received_any_platinum, received_any_taxane, 
+       .direction = "updown") %>% 
+  ungroup()
+  
+  
+  
 
-write_rds(Medications_long,
+write_rds(Chemotherapy_long,
           paste0(here::here(),
                  "/data/processed data",
                  "/Medication long format_",
                  today(), ".rds"))
-write_rds(Medications_long,
+write_rds(Chemotherapy_long,
           paste0(here::here(),
                  "/data/processed data",
                  "/Medication long format_",
                  today(), ".csv"))
 
-library(data.table)
-Medications_wide <- dcast(setDT(Medications_long),
-                     AvatarKey + MedicationInd + ever_first_med_age + has_first_line #+ received_carboplatin + received_taxane + received_bev 
-                     ~ rowid(AvatarKey),
-                     value.var = c("AgeAtMedStart", "regimen", "AgeAtMedStop")) %>% 
+library(data.table)########################################## STOP here-----------------------------
+Medications_wide <- dcast(setDT(Chemotherapy_long),
+                          AvatarKey + MedicationInd + has_first_line + ever_first_med_age +
+                            received_chemotherapy +
+                            received_carboplatin + received_paclitaxel +
+                            received_bev + 
+                            received_any_platinum + received_any_taxane
+                          ~ rowid(AvatarKey),
+                          value.var = c("AgeAtMedStart", "regimen", "AgeAtMedStop")) %>% 
   select(AvatarKey, drugs_ever = MedicationInd, ever_first_med_age, has_first_line, 
          # received_carboplatin, received_taxane, received_bev,
          starts_with("AgeAtMedStart_"),
@@ -779,17 +850,17 @@ write_rds(Medications_wide,
                  "/Medication wide format_",
                  today(), ".rds"))
 
-Medications_clean <- Medications_clean %>% 
+Chemotherapy_clean <- Chemotherapy_clean %>% 
   unite(drug_row_id_2, c(AvatarKey, drug_row_id), remove = FALSE) %>% 
   mutate(drug_sequence_vs_ovarian_drugs = "2- drugs for ovarian cancer")
 
 Medications_raw_1 <- Medications_raw %>% 
   # Filter all drugs for previous cancer and posterior cancer
   filter((str_detect(AvatarKey, 
-                     paste0(Medications_clean$AvatarKey, collapse = "|")))) %>% 
+                     paste0(Chemotherapy_clean$AvatarKey, collapse = "|")))) %>% 
   unite(drug_row_id_2, c(AvatarKey, drug_row_id), remove = FALSE) %>% 
   filter((!str_detect(drug_row_id_2, 
-                      paste0(Medications_clean_temp$drug_row_id_2, collapse = "|")))) %>% 
+                      paste0(Chemotherapy_clean_temp$drug_row_id_2, collapse = "|")))) %>% 
   # Add bolton class
   mutate(Medication = str_to_lower(Medication)) %>% 
   left_join(., drug_class, by = c("Medication" = "drug_name"))  %>%
@@ -807,7 +878,7 @@ Medications_raw_1 <- Medications_raw %>%
   )) %>% 
   select(-AgeAtMedStart_1) %>% 
   # Add all drugs for ovarian cancer
-  bind_rows(., Medications_clean) %>% 
+  bind_rows(., Chemotherapy_clean) %>% 
   # Create filter var for drugs before/after blood
   left_join(., ch_calls %>% 
               select(AvatarKey, germline_collection_age), 
@@ -829,10 +900,10 @@ write_rds(Medications_raw_1,
                  "/All medication all cancer for ovarian patients_",
                  today(), ".rds"))
 
-rm(Medications_, Medications_clean, 
+rm(Medications_, Chemotherapy_clean, 
    Medications_never,
-   Medications1, Medications1_missing, Medications1_no_missing,
-   Medications2, Medications3)
+   Medications1, Chemotherapy_missing_site, Medications1_no_missing,
+   Chemotherapy_ukn_site, Chemotherapy_ukn_site)
 
 # sct----
 # The first exploratory analysis showed that none of 
