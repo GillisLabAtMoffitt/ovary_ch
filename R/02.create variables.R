@@ -11,13 +11,13 @@ path_raw <- fs::path("", "Volumes", "Lab_Gillis",
 clinical_data <- 
   read_rds(paste0(
     here::here(), "/data/processed data",
-    "/ORIEN_data_with_ovarian_sample_2025-09-04.rds")) %>% 
+    "/ORIEN_data_with_ovarian_sample_20260127.rds")) %>% 
   janitor::clean_names()
 
 
 ################################################################################# II ### Create new variables
 gyn_data <- clinical_data %>% 
-  mutate(race_eth = factor(race_eth, levels = c("White Non-Hispanic",
+  mutate(raceeth = factor(raceeth, levels = c("White Non-Hispanic",
                                                 "Black Non-Hispanic",
                                                 "Hispanic any race"))) %>% 
   mutate(bmi_cat = case_when(
@@ -44,7 +44,7 @@ gyn_data <- clinical_data %>%
     str_detect(path_group_stage, "I")                         ~ "1"
   )) %>% 
   group_by(avatar_key) %>% 
-  mutate(stage = max(clin_group_stage, path_group_stage, na.rm = TRUE)) %>% 
+  mutate(stage = max(clin_group_stage, path_group_stage, na.rm = TRUE)) %>%
   ungroup() %>% 
   mutate(stage_cat = case_when(
     stage == "1" |
@@ -245,19 +245,19 @@ gyn_data <- clinical_data %>%
     has_medication_data == "Yes"                    ~ "No"
   )) %>% 
   mutate(received_carboplatin_regimen1 = case_when(
-    str_detect(regimen_1, "carboplatin")            ~ "Yes",
+    str_detect(regimen_drugs_1, "carboplatin")            ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_any_platin_regimen1 = case_when(
-    str_detect(regimen_1, "platin")                 ~ "Yes",
+    str_detect(regimen_drugs_1, "platin")                 ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_any_taxel_regimen1 = case_when(
-    str_detect(regimen_1, "taxel")                  ~ "Yes",
+    str_detect(regimen_drugs_1, "taxel")                  ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_bev_regimen1 = case_when(
-    str_detect(regimen_1, "bevacizumab")            ~ "Yes",
+    str_detect(regimen_drugs_1, "bevacizumab")            ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>% 
   # OS----
@@ -311,12 +311,12 @@ write_csv(gyn_data,
           paste0(here::here(), 
                  "/data/processed data",
                  "/Ovary and CH data_",
-                 today(), ".csv"))
+                 str_remove_all(today(), "-"), ".csv"))
 write_rds(gyn_data, 
           paste0(here::here(), 
                  "/data/processed data",
                  "/Ovary and CH data_",
-                 today(), ".rds"))
+                 str_remove_all(today(), "-"), ".rds"))
 
 path_save <- fs::path("", "Volumes", "Gillis_Research",
                       "Christelle Colin-Leitzinger", "Ovary CH",
@@ -325,13 +325,13 @@ write_csv(gyn_data,
           paste0(path_save, 
                  "/data/processed data",
                  "/Ovary and CH data_",
-                 today(), ".csv"))
+                 str_remove_all(today(), "-"), ".csv"))
 
 write_csv(gyn_data, 
           paste0(path_save, 
                  "/data/processed data",
                  "/Ovary and CH data_",
-                 today(), ".rds"))
+                 str_remove_all(today(), "-"), ".rds"))
 
 path_save <- fs::path("", "Volumes", "Peres_Research",
                       "ORIEN analysis", "Ovary CH")
@@ -340,7 +340,7 @@ write_csv(gyn_data,
           paste0(path_save, 
                  "/data/processed data",
                  "/Ovary and CH data_",
-                 today(), ".csv"))
+                 str_remove_all(today(), "-"), ".csv"))
 
 # End create variables
 
