@@ -13,7 +13,12 @@ clinical_data <-
     here::here(), "/data/processed data",
     "/ORIEN_data_with_ovarian_sample_20260127.rds")) %>% 
   janitor::clean_names()
-
+old_histo <- 
+  read_rds(paste0(
+    here::here(), "/data/processed data/Oldversion",
+    "/ORIEN_data_with_ovarian_sample_2025-09-04.rds")) %>% 
+  janitor::clean_names() %>% 
+  select(avatar_key, old_histo_bev = histology_behavior, old_histo = histology)
 
 ################################################################################# II ### Create new variables
 gyn_data <- clinical_data %>% 
@@ -54,66 +59,68 @@ gyn_data <- clinical_data %>%
   ), stage_cat = factor(stage_cat, levels = c("1-2",
                                               "3-4"))) %>% 
   # Create new var
+  left_join(., old_histo, by = "avatar_key") %>% 
   mutate(histology_behavior = str_match(histology_behavior, "([1-9]+ (.*))")[,3]) %>% 
+  mutate(old_histo_bev = str_match(old_histo_bev, "([1-9]+ (.*))")[,3]) %>% 
   mutate(histotype = case_when(
     
-    histology_behavior == "Endometrioid adenocarcinoma, NOS" &
-      histology == "Adenocarcinoma, NOS"                                 ~ "Endometrioid",
-    histology_behavior == "Endometrioid adenocarcinoma, NOS" &
-      histology == "Mixed cell adenocarcinoma"                           ~ "Endometrioid",
+    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
+      old_histo == "Adenocarcinoma, NOS"                                 ~ "Endometrioid",
+    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
+      old_histo == "Mixed cell adenocarcinoma"                           ~ "Endometrioid",
     
-    histology_behavior == "Serous surface papillary tumor of borderline malignancy" &
-      histology == "Serous cystadenoma, borderline malignancy"           ~ "Exclude",
+    old_histo_bev == "Serous surface papillary tumor of borderline malignancy" &
+      old_histo == "Serous cystadenoma, borderline malignancy"           ~ "Exclude",
     
-    histology_behavior == "Serous cystadenocarcinoma, NOS" &
-      histology == "Neoplasm, malignant"                                 ~ "Serous",
-    histology_behavior == "Serous cystadenocarcinoma, NOS" &
-      histology == "Neoplasm, malignant"                                 ~ "Serous",
-    histology_behavior == "Endometrioid adenocarcinoma, NOS" &
-      histology == "Other"                                               ~ "Endometrioid",
-    histology_behavior == "Serous surface papillary carcinoma" &
-      histology == "Serous endometrial/tubal intraepithelial carcinoma"  ~ "Serous",
-    histology_behavior == "Clear cell adenocarcinoma, NOS" &
-      histology == "Clear cell adenocarcinofibroma"                      ~ "Clear cell",
+    old_histo_bev == "Serous cystadenocarcinoma, NOS" &
+      old_histo == "Neoplasm, malignant"                                 ~ "Serous",
+    old_histo_bev == "Serous cystadenocarcinoma, NOS" &
+      old_histo == "Neoplasm, malignant"                                 ~ "Serous",
+    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
+      old_histo == "Other"                                               ~ "Endometrioid",
+    old_histo_bev == "Serous surface papillary carcinoma" &
+      old_histo == "Serous endometrial/tubal intraepithelial carcinoma"  ~ "Serous",
+    old_histo_bev == "Clear cell adenocarcinoma, NOS" &
+      old_histo == "Clear cell adenocarcinofibroma"                      ~ "Clear cell",
     
-    histology == "Serous cystadenocarcinoma, NOS"                        ~ "Serous",
-    histology == "Endometrioid adenocarcinoma, NOS"                      ~ "Endometrioid",
-    histology == "Papillary serous cystadenocarcinoma"                   ~ "Serous",
-    histology == "Clear cell adenocarcinoma, NOS"                        ~ "Clear cell",
-    histology == "Serous surface papillary carcinoma"                    ~ "Serous",
-    histology == "Mixed cell adenocarcinoma"                             ~ "Other epithelial",
-    histology == "Adenocarcinoma, NOS"                                   ~ "Other epithelial",
-    histology == "Carcinosarcoma, NOS"                                   ~ "Other epithelial",
-    histology == "Mucinous adenocarcinoma"                               ~ "Mucinous",
-    histology == "Carcinoma, NOS"                                        ~ "Other epithelial",
-    histology == "Mullerian mixed tumor"                                 ~ "Other epithelial",
-    histology == "Carcinoma, metastatic, NOS"                            ~ "Other epithelial",
-    histology == "Mucinous cystadenocarcinoma, NOS"                  ~ "Mucinous",
-    histology == "Neoplasm, malignant"                                  ~ "Exclude",
-    histology == "Papillary adenocarcinoma, NOS"                           ~ "Serous",
-    histology == "Squamous cell carcinoma, NOS"                           ~ "Other epithelial",
-    histology == "Transitional cell carcinoma, NOS"                  ~ "Serous",
-    histology == "Adenocarcinoma, intestinal type" &
-      histology_behavior == "Pseudomyxoma peritonei"                     ~ "Mucinous",
-    histology == "Carcinoma, anaplastic, NOS"                           ~ "Other epithelial",
-    histology == "Clear cell adenocarcinofibroma"                           ~ "Exclude",
-    histology == "Mesodermal mixed tumor"                                      ~ "Other epithelial",
-    histology == "Serous endometrial/tubal intraepithelial carcinoma"         ~ "Exclude",
-    histology == "Granulosa cell tumor, malignant"                        ~ "Exclude",
-    histology == "Serous cystadenoma, borderline malignancy"         ~ "Serous but not invasive so probably exclude?",
-    histology == "Sertoli-leydig cell tumor, poorly differentiated"         ~ "Exclude",
-    histology == "Sertoli cell carcinoma"                           ~ "Exclude",
-    histology == "Adenocarcinoma in situ, NOS"                           ~ "Other epithelial",
-    histology == "Large cell carcinoma, NOS"                           ~ "Other epithelial",
-    histology == "Small cell carcinoma, NOS"                           ~ "Other epithelial",
-    histology == "Mucinous cystic tumor of borderline malignancy"         ~ "Exclude",
-    histology == "Other"                                             ~ "Exclude",
-    histology == "Papillary carcinoma, NOS"                           ~ "Serous",
-    histology == "Sebaceous adenocarcinoma"                           ~ "Exclude",
-    histology == "Thecoma, malignant"                                    ~ "Exclude",
-    histology == "Dysgerminoma"                                          ~ "Exclude",
-    histology == "Mixed germ cell tumor"                                 ~ "Exclude",
-    histology == "Steroid cell tumor, malignant"                         ~ "Exclude"
+    old_histo == "Serous cystadenocarcinoma, NOS"                        ~ "Serous",
+    old_histo == "Endometrioid adenocarcinoma, NOS"                      ~ "Endometrioid",
+    old_histo == "Papillary serous cystadenocarcinoma"                   ~ "Serous",
+    old_histo == "Clear cell adenocarcinoma, NOS"                        ~ "Clear cell",
+    old_histo == "Serous surface papillary carcinoma"                    ~ "Serous",
+    old_histo == "Mixed cell adenocarcinoma"                             ~ "Other epithelial",
+    old_histo == "Adenocarcinoma, NOS"                                   ~ "Other epithelial",
+    old_histo == "Carcinosarcoma, NOS"                                   ~ "Other epithelial",
+    old_histo == "Mucinous adenocarcinoma"                               ~ "Mucinous",
+    old_histo == "Carcinoma, NOS"                                        ~ "Other epithelial",
+    old_histo == "Mullerian mixed tumor"                                 ~ "Other epithelial",
+    old_histo == "Carcinoma, metastatic, NOS"                            ~ "Other epithelial",
+    old_histo == "Mucinous cystadenocarcinoma, NOS"                  ~ "Mucinous",
+    old_histo == "Neoplasm, malignant"                                  ~ "Exclude",
+    old_histo == "Papillary adenocarcinoma, NOS"                           ~ "Serous",
+    old_histo == "Squamous cell carcinoma, NOS"                           ~ "Other epithelial",
+    old_histo == "Transitional cell carcinoma, NOS"                  ~ "Serous",
+    old_histo == "Adenocarcinoma, intestinal type" &
+      old_histo_bev == "Pseudomyxoma peritonei"                     ~ "Mucinous",
+    old_histo == "Carcinoma, anaplastic, NOS"                           ~ "Other epithelial",
+    old_histo == "Clear cell adenocarcinofibroma"                           ~ "Exclude",
+    old_histo == "Mesodermal mixed tumor"                                      ~ "Other epithelial",
+    old_histo == "Serous endometrial/tubal intraepithelial carcinoma"         ~ "Exclude",
+    old_histo == "Granulosa cell tumor, malignant"                        ~ "Exclude",
+    old_histo == "Serous cystadenoma, borderline malignancy"         ~ "Serous but not invasive so probably exclude?",
+    old_histo == "Sertoli-leydig cell tumor, poorly differentiated"         ~ "Exclude",
+    old_histo == "Sertoli cell carcinoma"                           ~ "Exclude",
+    old_histo == "Adenocarcinoma in situ, NOS"                           ~ "Other epithelial",
+    old_histo == "Large cell carcinoma, NOS"                           ~ "Other epithelial",
+    old_histo == "Small cell carcinoma, NOS"                           ~ "Other epithelial",
+    old_histo == "Mucinous cystic tumor of borderline malignancy"         ~ "Exclude",
+    old_histo == "Other"                                             ~ "Exclude",
+    old_histo == "Papillary carcinoma, NOS"                           ~ "Serous",
+    old_histo == "Sebaceous adenocarcinoma"                           ~ "Exclude",
+    old_histo == "Thecoma, malignant"                                    ~ "Exclude",
+    old_histo == "Dysgerminoma"                                          ~ "Exclude",
+    old_histo == "Mixed germ cell tumor"                                 ~ "Exclude",
+    old_histo == "Steroid cell tumor, malignant"                         ~ "Exclude"
   )) %>% 
   mutate(grade = case_when(
     histotype == "Serous" &

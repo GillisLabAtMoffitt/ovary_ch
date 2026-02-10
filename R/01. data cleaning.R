@@ -629,7 +629,13 @@ Medications_raw <- Medications_raw %>%
     TRUE                                             ~ regimen_line
   )) %>% 
   select(-c(no_line_info, has_some_sort_line_info, regimen_line2))
-  
+
+write_rds(Medications_raw,
+          paste0(here::here(),
+                 "/data/processed data",
+                 "/All_PatientsMedication_LongFormat_",
+                 today(), ".rds"))
+
 # For the patient with a ovary diagnosis site
 Chemotherapy_ovary <- Medications_raw %>%
   filter(str_detect(AvatarKey, paste0(Diagnosis2$AvatarKey, collapse = "|"))) %>% 

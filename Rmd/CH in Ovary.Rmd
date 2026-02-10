@@ -1,0 +1,937 @@
+---
+title: "CH in Ovary"
+author: "Christelle Colin-Leitzinger"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    theme: united
+    highlight: pygments
+    df_print: paged
+    code_folding: hide
+  word_document:
+    toc: true
+editor_options:
+  chunk_output_type: console
+---
+
+<style type= "text/css">
+
+. figure {
+   margin-top: 25px;
+   margin-bottom: 100px;
+}
+
+table {
+    margin-top: 10px;
+    margin-bottom: 25px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      cache = FALSE,
+                      fig.align='center'
+                      )
+```
+
+```{r library}
+library(here)
+library(tidyverse)
+library(gtsummary)
+library(labelled)
+library(survival)
+library(survminer)
+theme_set(theme_classic())
+theme_gtsummary_compact()
+```
+
+```{r load}
+gyn_data <-
+  read_rds(paste0(here(), 
+                  "/data/processed data",
+                  "/Ovary and CH data_20260209.rds")) %>% 
+  janitor::clean_names() %>% 
+  mutate(ch_status = factor(ch_status, levels = c("No CH", "CH")))
+pfs_data <-
+  readxl::read_xlsx(paste0(here(), 
+                  "/data/processed data",
+                  "/PFS_OS_CaseReview_20260210.xlsx"))
+medication_data <-
+  read_rds(paste0(here(), 
+                  "/data/processed data",
+                  "/All_PatientsMedication_LongFormat_2026-02-10.rds"))
+
+path_raw <- fs::path("", "Volumes", "Lab_Gillis",
+                     "ORIEN_Avatar", "resources")
+# load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_files.RData")
+
+gyn_data <- gyn_data %>% 
+  select(-c(germline_wes, tumor_wes, disease_type,
+            number_of_blood_variants, number_of_tumor_variants,
+            germline_kit, wes_batch, site,
+            age_at_clinical_record_creation, year_of_clinical_record_creation)) %>% 
+  mutate(had_prior_radiation = case_when(
+    age_at_first_radiation > ever_first_rad_age       ~ "Yes"
+  ))
+```
+
+```{r update PFS}
+gyn_data <- pfs_data %>% 
+  rename(pfs_time_from_treatment_years_updated = pfs_time_from_treatment_years,
+         pfs_event_updated = pfs_event,
+         pfs_age_updated = pfs_age) %>% 
+  left_join(gyn_data, ., by = "avatar_key") %>% 
+  # Recalculate time
+  mutate(pfs_time_from_treatment_years_updated = pfs_age_updated - age_at_first_treatment) %>% 
+  mutate(pfs_time_from_dx_years_updated = pfs_age_updated - age_at_diagnosis) %>% 
+  # Use updated time then original time if NA
+  mutate(pfs_age = coalesce(pfs_age_updated, pfs_age),
+         pfs_time_from_treatment_years = coalesce(pfs_time_from_treatment_years_updated, pfs_time_from_treatment_years),
+         pfs_time_from_dx_years = coalesce(pfs_time_from_dx_years_updated, pfs_time_from_dx_years)) %>% 
+  # Remove time for patients that need to be excluded from survival analysis
+  mutate_at(c("pfs_event", "pfs_age",
+              "pfs_time_from_dx_years",
+              "pfs_time_from_treatment_years"), ~ case_when(
+                exclusion_pfs == "exclude"                     ~ NA_real_,
+                TRUE                                           ~ .
+              )) %>% 
+  mutate_at(c("os_event", "os_age", 
+              "os_time_from_dx_years",
+              "os_time_from_treatment_years"), ~ case_when(
+                reason_exclusion_pfs == "older than 90"        ~ NA_real_,
+                TRUE                                           ~ .
+              )) %>% 
+  select(-c(pfs_time_from_treatment_years_updated, 
+            pfs_event_updated,
+            pfs_age_updated))
+```
+<br>
+
+Note: we talked about censoring at 5 years
+We started with `r nrow(gyn_data)` patients who has germline and tumor samples collected in "GYN - Ovarian Cancer" disease type.
+
+
+# Disease and histology
+These are characteristics listed in the sequencing sample data.    
+Lauren and I went through the histology data and classify the patient to exclude. I kept this table which shows their histology before exclusion.
+```{r}
+gyn_data %>% 
+  mutate(histotype = case_when(
+    histotype == "Serous but not invasive so probably exclude?"  ~ "Exclude",
+    TRUE                                                         ~ histotype
+  )) %>% 
+  select(histology_behavior_WES = histology_behavior,
+         histotype
+         ) %>% 
+  tbl_summary(by = histotype,
+              sort = list(everything() ~ "frequency")) %>%
+  bold_labels() %>% 
+  modify_spanning_header(everything() ~ "Histotype")
+
+# gyn_data %>% 
+#   select(histology_behavior,
+#          histotype,
+#          tumor_primary_met
+#          ) %>% 
+#   filter(tumor_primary_met == "Primary") %>% 
+#   mutate(histotype = fct_explicit_na(histotype)) %>%
+#   tbl_summary(by = histotype,
+#               sort = list(everything() ~ "frequency")) %>%
+#   bold_labels()
+# 
+# a <- gyn_data %>% 
+#   # filter(histotype == "Exclude") %>% 
+#   filter(histology_behavior != histology) %>% 
+#   select(histology_behavior_WES = histology_behavior,
+#          histology_Clinical = histology, histotype, tumor_primary_met) %>% 
+#   distinct()
+# print(a, n=40)
+# write_csv(a %>% arrange(histotype), "histology differences between Clinical and WES data.csv")
+
+gyn_data <- gyn_data %>% 
+  mutate(histotype = case_when(
+    histotype == "Serous but not invasive so probably exclude?"  ~ "Exclude",
+    TRUE                                                         ~ histotype
+  )) %>% 
+  filter(histotype != "Exclude") #%>% 
+  # mutate(grade = case_when(
+  #   histotype == "Serous" &
+  #     grade_pathological %in% c(
+  #       "Low grade", 
+  #       "Well differentiated")                         ~ "Low",
+  #   histotype == "Serous" &
+  #     grade_pathological %in% c(
+  #       "High grade", 
+  #       "Moderately differentiated",
+  #       "Poorly differentiated",
+  #       "Undifferentiated")                            ~ "High",
+  #   histotype == "Serous" &
+  #     grade_pathological %in% c(
+  #       "Grade cannot be assessed; Unknown",
+  #       "Site-specific grade system category",
+  #       "Unknown/Not Applicable"
+  #     )                                                ~ "High - Unknown Serous"#,
+  #   # TRUE                                               ~ grade_pathological
+  # ))
+```
+<br>
+
+# Analysis after histotype exclusion
+<!-- ## Cancer characteristics -->
+
+```{r}
+# gyn_data %>% 
+#   select(tumor_specimen_site_of_collection, 
+#          tumor_seq_histology_behavior = histology_behavior, 
+#          patient_dx_histology = histology,
+#          tumor_primary_met
+#          ) %>% 
+#   tbl_summary(by = tumor_primary_met,
+#               sort = list(everything() ~ "frequency")) %>%
+#   bold_labels() %>%
+#   add_overall() %>% 
+#   add_stat_label() %>%
+#   modify_header(label ~ "**Disease characteristics**",
+#                 all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+```{r}
+# gyn_data %>% 
+#   # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+#   mutate(primary_diagnosis_site = forcats::fct_infreq(primary_diagnosis_site)) %>% 
+#   # mutate(primary_diagnosis_site = relevel(factor(primary_diagnosis_site), ref = "Ovary")) %>% 
+#   select(
+#          histology, 
+#          primary_diagnosis_site, 
+#          
+#          # has_multiple_cancer, 
+#          pre_cancer_info, post_cancer_info,
+#          
+#          primary_diagnosis_site_code) %>% 
+#   tbl_summary(by = primary_diagnosis_site,
+#               sort = list(everything() ~ "frequency")) %>%
+#   bold_labels() %>%
+#   add_stat_label() %>%
+#   modify_header(label ~ "**Cancer characteristics**",
+#                 all_stat_cols() ~ "**{level}**, N = {n}") %>% 
+#   modify_spanning_header(everything() ~ "Primary Diagnosis Site")
+```
+<br>
+
+We now have `r nrow(gyn_data)` patients.
+<br>
+
+
+# Sample characteristic
+```{r}
+gyn_data %>% 
+  mutate(time_dx_to_blood_years = germline_collection_age - age_at_diagnosis) %>% 
+  ggplot(aes(x = time_dx_to_blood_years, fill=as.factor(..count..)))+
+  geom_histogram()+
+  scale_fill_viridis_d(
+    alpha = 1,
+    begin = 0,
+    end = 1,
+    direction = 1,
+    option = "D",
+    # space = "Lab",
+    na.value = "grey50",
+    aesthetics = "fill"
+  ) +
+  labs(x="Time from diagnosis to blood collection (Years)", y="Number of Patient")
+
+gyn_data %>% 
+  mutate(time_dx_to_blood_years = germline_collection_age - age_at_diagnosis) %>% 
+  mutate(time_dx_to_blood_months = time_dx_to_blood_years * 12) %>% 
+  select(time_dx_to_blood_years, time_dx_to_blood_months) %>% 
+  tbl_summary() %>%
+  bold_labels()
+```
+<br>
+
+# Patient characteristics
+I asked Kavita, to code stage they take the maximun values from ClinGroupStage and GradePathological. 
+No FIGO stage listed anywhere.   
+BMI is selected to be the closest to Dx (before or after).
+But in case of ovarian cancer for which patient often receive surgery, should I take only BMI before Dx.
+Or make a rule depending if patient received surgery?
+```{r}
+gyn_data %>%
+  select(age_at_diagnosis,
+         not_real_age, #not_real_sequencing_age,
+         race, ethnicity,
+         raceeth,
+         histotype, grade,
+         hgsoc_vs_others, stage_cat, stage,
+         # ecog, karnofsky,
+         bmi, bmi_cat,
+         smoking_status,
+         first_treatment,
+         time_dx_to_first_treatment_days,
+         vital_status,
+         os_event, os_time_from_treatment_years,
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
+         ) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")#,
+              # sort = list(all_categorical() ~ "frequency")
+              ) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t=0.05) %>% add_overall() %>%
+  # add_stat_label() %>%
+  modify_header(label ~ "**Patient characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+Patient with Unknown OS is a patient with a dx > 90 years old and follow up > 90 years old. We decided to exclude the patient from the survival analysis.   
+2 patients missing first treatment only had surgery for a diagnosis not "Ovary". I looked at the data, I don't think we can salvage.
+
+
+<br>
+
+check histotype
+```{r}
+gyn_data %>%
+  select(histotype,
+         histology, grade_pathological,
+         hgsoc_vs_others
+         ) %>%
+  tbl_summary(by = hgsoc_vs_others)
+```
+
+# Treatment
+I included treatment for the ovary diagnosis and added treatment for an unknown diagnosis site if only 1 dx was recorded in the diagnosis file.   
+
+## Surgery
+I am using the variables SiteDiagnostic, SiteTherapeutic, SitePalliative to code surgery_ever (aka SiteTherapeutic == "Yes")
+```{r}
+# SurgeryBiopsy %>%
+#   # For the patients with no diagnosis site
+#   filter(PrimaryDiagnosisSite == "Unknown/Not Applicable") %>%
+#   select(SurgeryBiopsyLocation, SiteDiagnostic, surgery_ever = SiteTherapeutic, SitePalliative,
+#          MethodCoreBiopsyTissue, MethodCoreBiopsyLymphNode, MethodSurgicalResection,
+#          MethodSentinelLymphNode, MethodSurgeryNOS, MethodOther, )
+```
+
+```{r}
+gyn_data %>%
+  select(has_surgery_data, age_at_first_surgery,
+         surgery_ever,
+         had_prior_surgery,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Surgery**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+
+# a <- gyn_data %>% 
+#   filter(had_prior_surgery == "Yes") %>% 
+#   select(avatar_key,
+#          has_surgery_data, age_at_first_surgery,
+#          surgery_ever,
+#          had_prior_surgery,
+#          age_at_diagnosis, number_of_dx,
+#          age_at_last_contact,
+#          pre_cancer_info, post_cancer_info) %>%
+#   inner_join(., SurgeryBiopsy, by = c("avatar_key" = "AvatarKey"))
+# 
+# write_csv(a, "had_prior_surgery.csv")
+```
+All prior surgery have been done for pre cancer.
+
+## Medication
+```{r}
+gyn_data %>%
+  select(has_medication_data, age_at_med_start_1,
+         drugs_ever,
+         starts_with("received_"),
+         regimen_drugs_1,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Medication**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+
+# a <- gyn_data %>% 
+#   filter(is.na(first_treatment)) %>% select(avatar_key,
+#          has_surgery_data, age_at_first_surgery,
+#          surgery_ever,
+#          had_prior_surgery,
+#          has_medication_data, age_at_med_start_1,
+#          age_at_diagnosis, number_of_dx, primary_diagnosis_site,
+#          primary_diagnosis_site_code,
+#          age_at_last_contact,
+#          pre_cancer_info, post_cancer_info) %>%
+#   inner_join(., SurgeryBiopsy, by = c("avatar_key" = "AvatarKey"))
+
+```
+
+### Medications before germline
+### For actual ovary dx
+```{r}
+gyn_data %>% 
+  left_join(., medication_data, by = c("avatar_key" = "AvatarKey")) %>% 
+  filter((AgeAtMedStart < germline_collection_age)) %>% 
+  filter((MedPrimaryDiagnosisSite == primary_diagnosis_site) | 
+           number_of_dx == 1) %>% 
+  select(Medication) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels()
+```
+
+### For other diagnosis
+```{r}
+gyn_data %>% 
+  left_join(., medication_data, by = c("avatar_key" = "AvatarKey")) %>% 
+  filter(AgeAtMedStart < germline_collection_age) %>% 
+  filter((MedPrimaryDiagnosisSite != primary_diagnosis_site) & 
+           number_of_dx > 1) %>% 
+  select(Medication, pre_cancer_info) %>% 
+  tbl_summary(sort = list(everything() ~ "frequency")) %>%
+  bold_labels()
+```
+
+## Radiation
+I don't think we are interested by radiation?
+```{r}
+gyn_data %>%
+  select(age_at_first_radiation, has_radiation_data,
+         radiation_ever,
+         had_prior_radiation,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Radiation**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+## SCT
+No SCT
+```{r}
+# gyn_data %>%
+#   select(age_at_first_sct, has_sct_data,
+#          sct_ever,
+#          ch_status) %>%
+#   tbl_summary(by = ch_status) %>%
+#   bold_labels() %>%
+#   add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+#   modify_header(label ~ "**SCT**",
+#                 all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+
+# Tumor markers
+```{r}
+gyn_data %>%
+  select(tumor_marker_ind, ca_125_marker_result : mdm2_marker_result) %>%
+  select(tumor_marker_ind, 
+         contains("brca"), contains("tp53"), 
+         contains("braf"), contains("ras"), 
+         contains("pik3"), contains("egfr"), 
+         pd_l1_marker_result,
+         ends_with("result")) %>% 
+  purrr::keep(~!all(is.na(.))) %>%
+  tbl_summary(
+    type = list(all_dichotomous() ~ "categorical")
+
+  ) %>%
+  bold_labels() %>%
+  # add_stat_label() %>%
+  modify_header(label ~ "**Tumor markers and germline_collection_age**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+# Survival
+
+For PFS I have "Progression" and "Recurrence", both are coded as event = 1.
+For PFS event == 1, I use AgeAtProgRecur, and for pfs event == 0, I use AgeAtCurrentDiseaseStatus which is more accurate.
+Patients who don't have info for PFS but have info for OS are not included into PFS coding as we are not sure if the patient had been seen/had a progression before their date of death/date of last contact.
+
+```{r}
+# gyn_data %>% select(pfs_time_from_treatment_years) %>% arrange(pfs_time_from_treatment_years)
+
+# a <- gyn_data %>%
+#   filter(pfs_time_from_treatment_years <= 0) %>%
+#   select(avatar_key, pfs_time_from_treatment_years, pfs_event,
+#          pfs_age, age_at_diagnosis, number_of_dx,
+#          age_at_last_contact,
+#          pre_cancer_info, post_cancer_info,
+#          # has_outcomes_data, outcomes_primary_diagnosis_site,
+#          age_at_first_treatment, first_treatment,
+#          age_at_first_surgery, age_at_med_start_1) %>%
+#   inner_join(., Outcomes, by = c("avatar_key" = "AvatarKey"))
+
+# write_csv(a, "PFS under 0 look at dx.csv")
+# write_csv(a, "PFS under 0 look at outcome.csv")
+# write_csv(a, "PFS under 0 look at medication.csv")
+# write_csv(a, "PFS under 0 look at surg.csv")
+```
+
+
+```{r}
+# gyn_data %>% select(os_time_from_treatment_years) %>% arrange(os_time_from_treatment_years)
+
+# a <- gyn_data %>%
+#   filter(os_time_from_treatment_years == 0) %>%
+#   select(avatar_key, pfs_time_from_treatment_years, pfs_event,
+#          pfs_age, age_at_diagnosis, number_of_dx,
+#          age_at_last_contact,
+#          pre_cancer_info, post_cancer_info,
+#          # has_outcomes_data, outcomes_primary_diagnosis_site,
+#          age_at_first_treatment, first_treatment,
+#          age_at_first_surgery, age_at_med_start_1) %>%
+#   inner_join(., SurgeryBiopsy, by = c("avatar_key" = "AvatarKey")) %>%
+#   inner_join(., VitalStatus, by = c("avatar_key" = "AvatarKey"))
+# 
+# write_csv(a, "OS time is 0.csv")
+```
+
+
+```{r}
+gyn_data %>%
+  select(has_os_data,
+         vital_status,
+         
+         os_event, os_time_from_treatment_years,
+         has_outcomes_data,
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
+         ) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Survival**")
+```
+
+## OS
+```{r}
+# gyn_data <- gyn_data %>%
+#   mutate(grade = case_when(
+#     histotype == "Serous" &
+#       grade_pathological %in% c(
+#         "Low grade",
+#         "Well differentiated")                         ~ "Low",
+#     histotype == "Serous" &
+#       grade_pathological %in% c(
+#         "High grade",
+#         "Moderately differentiated",
+#         "Poorly differentiated",
+#         "Undifferentiated")                            ~ "High",
+#     histotype == "Serous" &
+#       grade_pathological %in% c(
+#         "Grade cannot be assessed; Unknown",
+#         "Site-specific grade system category",
+#         "Unknown/Not Applicable"
+#       )                                                ~ "High"#,
+#     # TRUE                                               ~ grade_pathological
+#   ))
+```
+
+
+
+```{r}
+tbl1 <- tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = os_time_from_treatment_years, event = os_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", 
+              "hgsoc_vs_others", "histotype",
+              "stage_cat", "bmi_cat"),
+  pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>%
+  modify_spanning_header(everything() ~ "**OS**")
+
+tbl2 <- coxph(Surv(time = gyn_data$os_time_from_treatment_years,
+                   event = gyn_data$os_event) ~ ch_status + germline_collection_age + 
+        hgsoc_vs_others + stage_cat,
+              data = gyn_data)  %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  modify_spanning_header(everything() ~ "**OS**")
+
+# tbl3 <- coxph(Surv(time = gyn_data$os_time_from_treatment_years,
+#                    event = gyn_data$os_event) ~ ch_status + germline_collection_age + 
+#         grade + bmi_cat,
+#               data = gyn_data)  %>%
+#   tbl_regression(exponentiate = TRUE) %>%
+#   bold_p(t = .05) %>%
+#   add_nevent(location = "level") %>% add_n(location = "level") %>%
+#   modify_spanning_header(everything() ~ "**OS**")
+
+tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+```
+
+```{r}
+ggsurvplot(survfit(Surv(os_time_from_treatment_years, os_event) ~ ch_status,
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "OS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+```
+
+## PFS
+```{r}
+tbl1 <- tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = pfs_time_from_treatment_years, event = pfs_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", 
+              "hgsoc_vs_others", "histotype",
+              "stage_cat", "bmi_cat"),
+  # pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>%
+  modify_spanning_header(everything() ~ "**PFS**")
+
+tbl2 <- coxph(Surv(time = gyn_data$pfs_time_from_treatment_years,
+                   event = gyn_data$pfs_event) ~ ch_status + germline_collection_age + 
+        hgsoc_vs_others + stage_cat,
+              data = gyn_data)  %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  modify_spanning_header(everything() ~ "**PFS**")
+
+tbl3 <- coxph(Surv(time = gyn_data$pfs_time_from_treatment_years,
+                   event = gyn_data$pfs_event) ~ ch_status + germline_collection_age + 
+        grade + bmi_cat,
+              data = gyn_data)  %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  modify_spanning_header(everything() ~ "**PFS**")
+
+tbl_merge(list(tbl1, tbl2, tbl3), tab_spanner = c("**Univariable**", "**Multivariable**", "**Multivariable 2**"))
+
+```
+
+```{r}
+ggsurvplot(survfit(Surv(pfs_time_from_treatment_years, pfs_event) ~ ch_status,
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "PSS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+```
+
+# Sensitivity analysis in HGSC
+```{r}
+gyn_data <- gyn_data %>%
+  filter(hgsoc_vs_others == "High-grade serous/carcinosarcoma")
+```
+We have `r nrow(gyn_data)` patients.
+
+## Patient characteristics
+```{r}
+gyn_data %>% 
+  select(age_at_diagnosis,
+         # not_real_age, #not_real_sequencing_age,
+         race, ethnicity,
+         raceeth,
+         histotype, grade,
+         hgsoc_vs_others, stage_cat, stage,
+         # ecog, karnofsky,
+         bmi, bmi_cat,
+         smoking_status,
+         first_treatment,
+         time_dx_to_first_treatment_days,
+         vital_status,
+         os_event, os_time_from_treatment_years,
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
+  ) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")#,
+              # sort = list(all_categorical() ~ "frequency")
+              ) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t=0.05) %>% add_overall() %>%
+  # add_stat_label() %>%
+  modify_header(label ~ "**Patient characteristics**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+<br>
+
+## Treatment
+
+### Surgery
+```{r}
+gyn_data %>%
+  select(has_surgery_data, age_at_first_surgery,
+         surgery_ever,
+         # had_prior_surgery,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Surgery**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+## Medication
+```{r}
+gyn_data %>%
+  select(has_medication_data, age_at_med_start_1,
+         drugs_ever,
+         starts_with("received_"),
+         regimen_drugs_1,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Medication**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+<!-- ### Medications after germline -->
+<!-- ```{r} -->
+<!-- gyn_data %>% -->
+<!--   filter(drugs_ever == "Yes") %>% -->
+<!--   select(avatar_key, starts_with("regimen")) %>% -->
+<!--   pivot_longer(cols = -avatar_key, -->
+<!--                values_to = "drug_name", -->
+<!--                values_drop_na = TRUE) %>% -->
+<!--   group_by(avatar_key) %>% -->
+<!--   mutate(number_of_regimen = n()) %>% -->
+<!--   ungroup() %>% -->
+<!--   distinct(avatar_key, .keep_all = TRUE) %>% -->
+<!--   select(number_of_regimen) %>% -->
+<!--   tbl_summary(type = list(number_of_regimen ~ "categorical")) %>% -->
+<!--   bold_labels() -->
+
+<!-- gyn_data %>% -->
+<!--   filter(drugs_ever == "Yes") %>% -->
+<!--   select(avatar_key, starts_with("regimen")) %>% -->
+<!--   pivot_longer(cols = -avatar_key, -->
+<!--                values_to = "drug_name", -->
+<!--                values_drop_na = TRUE) %>% -->
+<!--   select(drug_name) %>% -->
+<!--   tbl_summary(sort = list(everything() ~ "frequency")) %>% -->
+<!--   bold_labels() -->
+
+<!-- gyn_data %>% -->
+<!--   filter(drugs_ever == "Yes") %>% -->
+<!--   select(avatar_key, starts_with("regimen"), ch_status) %>% -->
+<!--   pivot_longer(cols = -c(avatar_key, ch_status), -->
+<!--                values_to = "drug_name", -->
+<!--                values_drop_na = TRUE) %>% -->
+<!--   mutate(received_carboplatin = case_when( -->
+<!--     str_detect(drug_name, "Carboplatin")        ~ "Yes" -->
+<!--   )) %>% -->
+<!--   group_by(avatar_key) %>% -->
+<!--   fill(received_carboplatin, .direction = "updown") %>% -->
+<!--   ungroup() %>% -->
+<!--   distinct(avatar_key, .keep_all = TRUE) %>% -->
+<!--   mutate(received_carboplatin = str_replace_na(received_carboplatin, "No")) %>% -->
+<!--   select(received_carboplatin, ch_status) %>% -->
+<!--   tbl_summary(by = ch_status) %>% -->
+<!--   add_p() %>% bold_p(t = 0.05) %>% add_overall() -->
+<!-- ``` -->
+
+
+
+
+
+## Radiation
+```{r}
+gyn_data %>%
+  select(age_at_first_radiation, has_radiation_data,
+         radiation_ever,
+         had_prior_radiation,
+         ch_status) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Radiation**",
+                all_stat_cols() ~ "**{level}**, N = {n}")
+```
+
+<!-- ## Tumor markers -->
+<!-- I need to look more at these markers -->
+<!-- ```{r} -->
+<!-- gyn_data %>%  -->
+<!--   select(fish_t_4_14 : hpv_63) %>%  -->
+<!--   purrr::keep(~!all(is.na(.))) %>% -->
+<!--   tbl_summary() %>% -->
+<!--   bold_labels() %>% -->
+<!--   # add_stat_label() %>% -->
+<!--   modify_header(label ~ "**Tumor markers and germline_collection_age**", -->
+<!--                 all_stat_cols() ~ "**{level}**, N = {n}") -->
+<!-- ``` -->
+
+## Survival
+
+```{r}
+gyn_data %>%
+  select(has_os_data,
+         vital_status,
+         
+         os_event, os_time_from_treatment_years,
+         has_outcomes_data,
+         pfs_event, pfs_time_from_treatment_years,
+         ch_status, tumor_ch_status
+         ) %>%
+  tbl_summary(by = ch_status,
+              type = list(all_dichotomous() ~ "categorical")) %>%
+  bold_labels() %>%
+  add_p() %>% bold_p(t = 0.05) %>% add_overall() %>%
+  modify_header(label ~ "**Survival**")
+```
+
+### OS
+```{r}
+tbl1 <- tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = os_time_from_treatment_years, event = os_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", 
+              "histotype",
+              "stage_cat", "bmi_cat"),
+  pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>%
+  modify_spanning_header(everything() ~ "**OS**")
+
+tbl2 <- coxph(Surv(time = gyn_data$os_time_from_treatment_years,
+                   event = gyn_data$os_event) ~ ch_status + germline_collection_age + 
+        stage_cat,
+              data = gyn_data)  %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  modify_spanning_header(everything() ~ "**OS**")
+
+tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+```
+
+```{r}
+ggsurvplot(survfit(Surv(os_time_from_treatment_years, os_event) ~ ch_status,
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "OS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+```
+
+
+### PFS
+```{r}
+tbl1 <- tbl_uvregression(
+  gyn_data,
+  method = coxph,
+  y = Surv(time = pfs_time_from_treatment_years, event = pfs_event),
+  exponentiate = TRUE,
+  include = c("ch_status", "germline_collection_age", 
+              "histotype",
+              "stage_cat", "bmi_cat"),
+  # pvalue_fun = label_style_pvalue(digits = 2)
+  ) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  bold_labels() %>% italicize_levels() %>%
+  modify_spanning_header(everything() ~ "**PFS**")
+
+tbl2 <- coxph(Surv(time = gyn_data$pfs_time_from_treatment_years,
+                   event = gyn_data$pfs_event) ~ ch_status + germline_collection_age + 
+        stage_cat,
+              data = gyn_data)  %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  bold_p(t = .05) %>%
+  add_nevent(location = "level") %>% add_n(location = "level") %>%
+  modify_spanning_header(everything() ~ "**PFS**")
+
+tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+
+```
+
+```{r}
+ggsurvplot(survfit(Surv(pfs_time_from_treatment_years, pfs_event) ~ ch_status,
+                   data = gyn_data),
+           # title = "PFS Analysis",
+           font.main = c(20, "bold", "black"),
+           font.x = c(15, "bold", "black"),
+           font.y = c(15, "bold", "black"),
+           font.legend = c(14, "black"),
+           font.tickslab = c(12, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           ylab = "PSS (probability)",
+           legend = "top",
+           # legend.title = "",
+           pval = TRUE,
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE
+) %++% guides(colour = guide_legend(nrow = 1))
+```
+
+
+
