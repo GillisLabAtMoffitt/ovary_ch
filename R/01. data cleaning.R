@@ -35,15 +35,15 @@ load(paste0(here::here(),
             "/data/raw data",
             "/CHinORIEN_AllTumorTypes_Files.RData"))
 
-path_raw <- fs::path("", "Volumes", "Gillis_Research",
-                     "Lab_Data", "CHinORIEN")
+path <- fs::path("", "Volumes", "Gillis_Research",
+                     "Lab_Data")
 
 # The cleaning and merging steps are in the ch_orien project
 # The clean data is located here :
 # data <- read_rds(paste0("~/Documents/GitHub/Gillis/ch_orien",
 #                         "/Rmd/R01 Gillis-Teng 2023-2024/cleaned_all_tumor_type_data_06242024.rds"))
 
-path <- fs::path("", "Volumes", "Gillis_Research", "Lab_Data", "CHinOvary")
+path_raw <- fs::path("", "Volumes", "Gillis_Research", "Lab_Data", "CHinOvary")
 # ch_calls <- read_csv(paste0(
 #   path,
 #   "/ProcessedData",
@@ -60,7 +60,7 @@ ClinicalMolLinkage <- read_csv(paste0(
   "/data/raw data",
   "/CHinOvary_ClinicalMolLinkage_V4.csv"))
 
-# I updated the drug_class file # Not run
+# I updated the drug_class file several times # Not run
 # path_drug_class <- fs::path("", "Volumes", "Gillis_Research", "Lab_Data", "BreastCHEvolution")
 # oldversion_drug_class <- 
 #   readxl::read_xlsx(paste0(
@@ -69,11 +69,18 @@ ClinicalMolLinkage <- read_csv(paste0(
 #     sheet = "Sup. Table 1", skip = 1) %>% 
 #   janitor::clean_names()
 # Load updated file
+path_drug <- fs::path("", "Volumes", "Gillis_Research",
+                 "Lab_Data", "SharedResources")
 drug_class <- 
   read.csv(paste0(here::here(), 
-                  "/data/processed data",
-                  "/CHinOvary_Updated_BoltonChemoDosing_20260127.csv"))
-
+                  "/data/processed_data",
+                  # path_drug, "/BoltonDrugCategories", 
+                  "/CHinOvary_Updated_BoltonChemoDosing_20260617.csv"))
+removed_drug <- 
+  read.csv(paste0(here::here(), 
+                  "/data/processed_data",
+                  # path_drug, "/NotCancerDrugs",
+                  "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
 
 
 ################################################################################# II ### Data cleaning
@@ -499,6 +506,51 @@ rm(MetastaticDisease1, MetastaticDisease2)
 
 
 # medication----
+# We reviewed the drugs name that ovarian patients for their ovarian cancer after the first data wrangling
+# Here is a script to add new drugs names into the Bolton categories
+# drug_class <- drug_class %>%
+#   add_row(drug_name = "denosumab", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "gemtuzumab ozogamicin", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "altretamine", narrow_drug_class_cytotoxic_only = "alkylating_agent", general_drug_class = "cytotoxic_therapy") %>%
+#   add_row(drug_name = "interferon", narrow_drug_class_cytotoxic_only = "immune_therapy", general_drug_class = "immune_therapy") %>%
+#   add_row(drug_name = "trifluridine", narrow_drug_class_cytotoxic_only = "antimetabolite", general_drug_class = "cytotoxic_therapy") %>%
+#   add_row(drug_name = "raloxifene", narrow_drug_class_cytotoxic_only = "hormonal_therapy", general_drug_class = "hormonal_therapy") %>%
+#   add_row(drug_name = "lanreotide", narrow_drug_class_cytotoxic_only = "hormonal_therapy", general_drug_class = "hormonal_therapy")
+# drug_class <- drug_class %>%
+#   add_row(drug_name = "sodium iodide i-131", narrow_drug_class_cytotoxic_only = "unconjugated_isotope", general_drug_class = "radiotherapy") %>%
+#   distinct() %>% 
+#   arrange(drug_name)
+# write_csv(drug_class,
+#           paste0(here::here(),
+#                  "/data/processed_data",
+#                  "/CHinOvary_Updated_BoltonChemoDosing_20260617.csv"))
+# write_csv(drug_class,
+#           paste0(path_raw,
+#                  "/ProcessedData",
+#                  "/CHinOvary_Updated_BoltonChemoDosing_20260617.csv"))
+# write_csv(drug_class,
+#           paste0(path_drug,
+#                  "/BoltonDrugCategories",
+#                  "/CHinOvary_Updated_BoltonChemoDosing_20260617.csv"))
+
+
+# removed_drug <- removed_drug %>% 
+#   add_row(drug_name = "folinic acid", drug_type = "Not a cancer drug") %>% 
+#   distinct() %>% 
+#   arrange(drug_name)
+# write_csv(removed_drug,
+#           paste0(here::here(),
+#                  "/data/processed_data",
+#                  "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
+# write_csv(removed_drug,
+#           paste0(path_raw,
+#                  "/ProcessedData",
+#                  "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
+# write_csv(removed_drug,
+#           paste0(path_drug,
+#                  "/NotCancerDrugs",
+#                  "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
+
 Medications_ <- Medications %>%
   filter(str_detect(AvatarKey, paste0(ch_calls$AvatarKey, collapse = "|"))) %>% 
   mutate(across(c("AgeAtMedStart",
@@ -511,31 +563,11 @@ Medications_ <- Medications %>%
   mutate(ever_first_med_age = min(AgeAtMedStart, AgeAtMedStop)) %>% 
   ungroup()
 
-# We reviewed the drugs name that ovarian patients for their ovarian cancer after the first data wrangling
-# Here is a script to add new drugs names into the Bolton categories
-# drug_class <- drug_class %>%
-#   add_row(drug_name = "denosumab", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
-#   add_row(drug_name = "gemtuzumab ozogamicin", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
-#   add_row(drug_name = "altretamine", narrow_drug_class_cytotoxic_only = "alkylating_agent", general_drug_class = "cytotoxic_therapy") %>%
-#   add_row(drug_name = "interferon", narrow_drug_class_cytotoxic_only = "immune_therapy", general_drug_class = "immune_therapy") %>%
-#   add_row(drug_name = "trifluridine", narrow_drug_class_cytotoxic_only = "antimetabolite", general_drug_class = "cytotoxic_therapy") %>%
-#   add_row(drug_name = "raloxifene", narrow_drug_class_cytotoxic_only = "hormonal_therapy", general_drug_class = "hormonal_therapy") %>%
-#   add_row(drug_name = "lanreotide", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy")
-# write_csv(drug_class,
-#           paste0(here::here(),
-#                  "/data/processed data",
-#                  "/CHinOvary_Updated_BoltonChemoDosing_20260127.csv"))
-# write_csv(drug_class,
-#           paste0(path,
-#                  "/ProcessedData",
-#                  "/CHinOvary_Updated_BoltonChemoDosing_20260127.csv"))
-
-
 # Here the script to update names to fit Bolton categories
 Medications_ <- Medications_ %>% 
   mutate(Medication = str_remove(
     Medication, 
-    " Hydrochloride|Liposomal | Sulfate| Phosphate| Citrate| Acetate| Camsylate| Disodium| Mesylate| Ditosylate| Tosylate| Tartrate"), 
+    " Hydrochloride|Liposomal | Sulfate| Phosphate| Citrate| Acetate| Camsylate| Disodium| Mesylate| Ditosylate| Tosylate| Tartrate| \\(Leucovorin\\)"), 
     Medication = case_when(
       str_detect(Medication, "Paclitaxel")        ~ "Paclitaxel",
       Medication == "Interferon, NOS"             ~ "Interferon",
@@ -543,15 +575,37 @@ Medications_ <- Medications_ %>%
       TRUE                                        ~ Medication
     ))
 
+
 # Now that the drug names are updated, I can join the data with the Bolton categories
-Medications_raw <- Medications_ %>% 
+Medications1 <- Medications_ %>% 
   mutate(Medication = str_to_lower(Medication)) %>% 
+  # Remove non cancer drugs from data so their date start will not count
+  left_join(., removed_drug, by = c("Medication" = "drug_name")) %>% 
+  filter(is.na(drug_type)) %>% select(-drug_type) %>% 
+  # Add Bolton chemo cat
   left_join(., drug_class, by = c("Medication" = "drug_name")) %>% 
   # and code an overall chemotherapy variable
   mutate(is_chemotherapy = case_when(
     !is.na(narrow_drug_class_cytotoxic_only)        ~ "Yes",
     Medication == "chemo, nos"                      ~ "Yes"
-  ), .after = MedicationInd) %>% 
+  ), .after = MedicationInd) 
+
+
+
+# Separate patient who didn't receive drugs
+Medications_never <- Medications1 %>% 
+  filter(MedicationInd == "No") %>% 
+  mutate(has_first_line = "Never received any drug", .after = MedicationInd) %>%
+  mutate(is_chemotherapy =  "Never received any drug", .after = MedicationInd)
+
+Medications_raw <- Medications1 %>% 
+  # Fix age for a couple of patients
+  mutate(AgeAtMedStart = coalesce(AgeAtMedStart, AgeAtMedStop)) %>% 
+  group_by(AvatarKey) %>% 
+  mutate(ever_first_med_age = min(AgeAtMedStart, na.rm = TRUE),
+         ever_first_med_age = na_if(ever_first_med_age, Inf)) %>% 
+  ungroup() %>% 
+  # recode line
   # There are regimen line are unknown 
   # but some have the same age as other row for which the line is known, use to fill it up
   mutate(MedLineRegimen = case_when( # m
@@ -566,22 +620,16 @@ Medications_raw <- Medications_ %>%
   group_by(AvatarKey, MedLineRegimen) %>% 
   fill(AgeAtMedStart, .direction = "updown") %>% 
   ungroup() %>% 
-  # mutate(MedLineRegimen = coalesce(MedLineRegimen_temp, MedLineRegimen)) %>% 
+  # Organize vars
   select(-c(MedReasonNoneGiven : MedPrimaryDiagnosisSite), 
          everything(), MedReasonNoneGiven : MedPrimaryDiagnosisSite) %>% 
   distinct() %>% 
   left_join(., Diagnosis2 %>% select(AvatarKey, AgeAtDiagnosis), by = "AvatarKey") %>% 
   mutate(AgeAtMedStart = coalesce(AgeAtMedStart, AgeAtDiagnosis)) %>% 
   select(-AgeAtDiagnosis)
-
-# Separate patient who didn't receive drugs
-Medications_never <- Medications_raw %>% 
-  filter(MedicationInd == "No") %>% 
-  mutate(has_first_line = "Never received any drug", .after = MedicationInd) %>% 
-  mutate(is_chemotherapy =  "Never received any drug", .after = MedicationInd)
   
 # Start a clean Chemotherapy data
-Medications_raw <- Medications_raw %>% 
+Medications_yes <- Medications_raw %>% 
   filter(MedicationInd == "Yes") %>% 
   mutate(regimen_line = case_when(
     is.na(MedLineRegimen)                            ~ 999,
@@ -606,7 +654,7 @@ Medications_raw <- Medications_raw %>%
   ), .after = MedLineRegimen) %>% 
   
   # Manually code line if thee are no line info at all
-  arrange(AvatarKey, AgeAtMedStart) %>% 
+  arrange(AvatarKey, AgeAtMedStart, Medication) %>% 
   mutate(no_line_info = case_when(
     is.na(MedLineRegimen)                            ~ 999
   )) %>% 
@@ -630,14 +678,14 @@ Medications_raw <- Medications_raw %>%
   )) %>% 
   select(-c(no_line_info, has_some_sort_line_info, regimen_line2))
 
-write_rds(Medications_raw,
+write_rds(Medications_yes,
           paste0(here::here(),
-                 "/data/processed data",
+                 "/data/processed_data",
                  "/All_PatientsMedication_LongFormat_",
-                 today(), ".rds"))
+                 str_remove_all(today(), "-"), ".rds"))
 
 # For the patient with a ovary diagnosis site
-Chemotherapy_ovary <- Medications_raw %>%
+Chemotherapy_ovary <- Medications_yes %>%
   filter(str_detect(AvatarKey, paste0(Diagnosis2$AvatarKey, collapse = "|"))) %>% 
   inner_join(., Diagnosis2 %>%
                select(AvatarKey, PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite, number_of_dx) %>% 
@@ -668,19 +716,6 @@ Chemotherapy_ovary <- Medications_raw %>%
   ungroup() %>% 
   select(-c(PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite, number_of_dx))
 
-
-
-
-
-
-# Do I need to remove the non chemo?
-
-
-
-
-
-
-
 Chemotherapy_final <- bind_rows(Chemotherapy_ovary, Medications_never) %>% 
   distinct(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop, .keep_all = TRUE) %>% 
   group_by(AvatarKey, is_chemotherapy) %>% 
@@ -701,6 +736,7 @@ Chemotherapy_long <- Chemotherapy_final %>%
   summarise_at(vars(Medication, 
                     narrow_drug_class_cytotoxic_only, 
                     general_drug_class), str_c, collapse = "; ") %>%
+  arrange(AvatarKey, regimen_line, AgeAtMedStart, Medication) %>% 
   group_by(AvatarKey, regimen_line, first_chemo_age, AgeAtMedStart, MedicationInd, 
            ever_first_med_age#, has_first_line
   ) %>%
@@ -714,14 +750,14 @@ Chemotherapy_long <- Chemotherapy_final %>%
   
 write_rds(Chemotherapy_long,
           paste0(here::here(),
-                 "/data/processed data",
+                 "/data/processed_data",
                  "/Medication long format_",
-                 today(), ".rds"))
-write_rds(Chemotherapy_long,
+                 str_remove_all(today(), "-"), ".rds"))
+write_csv(Chemotherapy_long,
           paste0(here::here(),
-                 "/data/processed data",
+                 "/data/processed_data",
                  "/Medication long format_",
-                 today(), ".csv"))
+                 str_remove_all(today(), "-"), ".csv"))
 
 library(data.table)
 Medications_wide <- dcast(setDT(Chemotherapy_long),
@@ -792,34 +828,34 @@ Radiation_long <- Radiation1 %>%
   )) %>% 
   select(-c(germline_collection_age))
 
-write_rds(Radiation_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Radiation long format_",
-                 today(), ".rds"))
-write_rds(Radiation_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Radiation long format_",
-                 today(), ".csv"))
+# write_rds(Radiation_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Radiation long format_",
+#                  str_remove_all(today(), "-"), ".rds"))
+# write_rds(Radiation_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Radiation long format_",
+#                  str_remove_all(today(), "-"), ".csv"))
 
 library(data.table)
 Radiation_wide <- dcast(setDT(Radiation_long),
                           AvatarKey + RadiationTherapyInd + ever_first_rad_age ~ rowid(AvatarKey),
                           value.var = c("AgeAtRadiationStart", "RadDose", "AgeAtRadiationStop")) %>% 
   select(AvatarKey, radiation_ever = RadiationTherapyInd, ever_first_rad_age, 
-         age_at_first_radiation = AgeAtRadiationStart_1, starts_with("AgeAtRadiationStart_"),
+         starts_with("AgeAtRadiationStart_"),
          starts_with("RadDose_"), starts_with("AgeAtMedStop_"), everything()) %>%
   mutate(has_radiation_data = "Yes") %>% 
   mutate(had_prior_radiation = case_when(
-    age_at_first_radiation > ever_first_rad_age       ~ "Yes"
+    AgeAtRadiationStart_1 > ever_first_rad_age       ~ "Yes"
   ))
 
-write_rds(Radiation_wide,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Radiation wide format_",
-                 today(), ".rds"))
+# write_rds(Radiation_wide,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Radiation wide format_",
+#                  str_remove_all(today(), "-"), ".rds"))
 
 
 rm(Radiation1, Radiation2)
@@ -874,22 +910,22 @@ SurgeryBiopsy_long <- SurgeryBiopsy1 %>%
   full_join(., ch_calls %>% 
               select(AvatarKey, germline_collection_age), 
             by = "AvatarKey") %>% 
-  mutate(radiation_specimen_sequence = case_when(
+  mutate(surgery_specimen_sequence = case_when(
     AgeAtSurgeryBiopsy <= germline_collection_age        ~ "surgery before germline",
     AgeAtSurgeryBiopsy > germline_collection_age         ~ "surgery after germline"
   )) %>% 
   select(-c(germline_collection_age))
 
-write_rds(SurgeryBiopsy_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Surgery long format_",
-                 today(), ".rds"))
-write_rds(SurgeryBiopsy_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Surgery long format_",
-                 today(), ".csv"))
+# write_rds(SurgeryBiopsy_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Surgery long format_",
+#                  str_remove_all(today(), "-"), ".rds"))
+# write_rds(SurgeryBiopsy_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Surgery long format_",
+#                  str_remove_all(today(), "-"), ".csv"))
 
 library(data.table)
 SurgeryBiopsy_wide <- dcast(setDT(SurgeryBiopsy_long),
@@ -1055,16 +1091,16 @@ TumorMarker_long <- TumorMarker_3 %>%
   select(-c(FlowPanelResult, tumor_collection_age, int, 
             TumorMarkerKey, AgeAtTumorMarkerTest))
 
-write_rds(TumorMarker_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Tumor marker long format_",
-                 today(), ".rds"))
-write_rds(TumorMarker_long,
-          paste0(here::here(),
-                 "/data/processed data",
-                 "/Tumor marker long format_",
-                 today(), ".csv"))
+# write_rds(TumorMarker_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Tumor marker long format_",
+#                  str_remove_all(today(), "-"), ".rds"))
+# write_rds(TumorMarker_long,
+#           paste0(here::here(),
+#                  "/data/processed data",
+#                  "/Tumor marker long format_",
+#                  str_remove_all(today(), "-"), ".csv"))
 
 TumorMarker_wide <- TumorMarker_long %>%
   # mutate_at(c("AgeAtTumorMarkerTest",
@@ -1157,15 +1193,19 @@ rm(demographics, VitalStatus, Diagnosis,
 # Save
 write_csv(clinical_data,
           paste0(here::here(), 
-                 "/data/processed data",
+                 "/data/processed_data",
                  "/ORIEN_data_with_ovarian_sample_",
                  str_remove_all(today(), "-"), ".csv"))
 write_rds(clinical_data, 
           paste0(here::here(), 
-                 "/data/processed data",
+                 "/data/processed_data",
                  "/ORIEN_data_with_ovarian_sample_",
                  str_remove_all(today(), "-"), ".rds"))
-
+write_csv(clinical_data,
+          paste0(path_raw,
+                 "/ProcessedData",
+                 "/ORIEN_data_with_ovarian_sample_",
+                 str_remove_all(today(), "-"), ".csv"))
 
 # End data cleaning
 

@@ -10,12 +10,12 @@ path_raw <- fs::path("", "Volumes", "Lab_Gillis",
 
 clinical_data <- 
   read_rds(paste0(
-    here::here(), "/data/processed data",
-    "/ORIEN_data_with_ovarian_sample_20260127.rds")) %>% 
+    here::here(), "/data/processed_data",
+    "/ORIEN_data_with_ovarian_sample_20260618.rds")) %>% 
   janitor::clean_names()
 old_histo <- 
   read_rds(paste0(
-    here::here(), "/data/processed data/Oldversion",
+    here::here(), "/data/processed_data/Oldversion",
     "/ORIEN_data_with_ovarian_sample_2025-09-04.rds")) %>% 
   janitor::clean_names() %>% 
   select(avatar_key, old_histo_bev = histology_behavior, old_histo = histology)
@@ -24,7 +24,7 @@ old_histo <-
 gyn_data <- clinical_data %>% 
   mutate(raceeth = factor(raceeth, levels = c("White Non-Hispanic",
                                                 "Black Non-Hispanic",
-                                                "Hispanic any race"))) %>% 
+                                                "Hispanic, any race"))) %>% 
   mutate(bmi_cat = case_when(
     bmi_cat == "Underweight" |
       bmi_cat == "Healthy"                         ~ "Underweight - Healthy",
@@ -120,8 +120,10 @@ gyn_data <- clinical_data %>%
     old_histo == "Thecoma, malignant"                                    ~ "Exclude",
     old_histo == "Dysgerminoma"                                          ~ "Exclude",
     old_histo == "Mixed germ cell tumor"                                 ~ "Exclude",
-    old_histo == "Steroid cell tumor, malignant"                         ~ "Exclude"
+    old_histo == "Steroid cell tumor, malignant"                         ~ "Exclude",
+    TRUE          ~ "?"
   )) %>% 
+  mutate(grade_pathological = str_to_sentence(grade_pathological)) %>% 
   mutate(grade = case_when(
     histotype == "Serous" &
       grade_pathological %in% c(
@@ -135,18 +137,16 @@ gyn_data <- clinical_data %>%
         "Undifferentiated")                            ~ "High",
     histotype == "Serous" &
       grade_pathological %in% c(
-        "Grade cannot be assessed; Unknown",
+        "Grade cannot be assessed; unknown",
         "Site-specific grade system category",
-        "Unknown/Not Applicable"
+        "Unknown/not applicable"
       )                                                ~ "High",
     histotype == "Exclude"                             ~ "Exclude"#,
-    # TRUE                                               ~ grade_pathological
+    # TRUE                                               ~ paste0(histotype, grade_pathological)
   ), grade = factor(grade, levels = c("Low",
                                       "High"))) %>% 
   mutate(hgsoc_vs_others = case_when(
-    grade == "High" #|
-      # grade == "High - Unknown Serous"                 
-                                                       ~ "High-grade serous/carcinosarcoma",
+    grade == "High"                                    ~ "High-grade serous/carcinosarcoma",
     histology == "Carcinosarcoma, NOS"                 ~ "High-grade serous/carcinosarcoma",
     histotype == "Exclude"                             ~ "Exclude",
     !is.na(grade) | 
@@ -184,35 +184,35 @@ gyn_data <- clinical_data %>%
   )) %>% 
   # Age at first treatment
   mutate(first_treatment = case_when(
-    (age_at_first_radiation < age_at_first_surgery |
+    (age_at_radiation_start_1 < age_at_first_surgery |
        (is.na(age_at_first_surgery) &
-          !is.na(age_at_first_radiation))) &
+          !is.na(age_at_radiation_start_1))) &
       
-      (age_at_first_radiation < age_at_med_start_1 |
+      (age_at_radiation_start_1 < age_at_med_start_1 |
          (is.na(age_at_med_start_1) &
-            !is.na(age_at_first_radiation)))        ~ "Radiation",
+            !is.na(age_at_radiation_start_1)))        ~ "Radiation",
     
-    (age_at_first_surgery < age_at_first_radiation | 
-       (is.na(age_at_first_radiation) &
+    (age_at_first_surgery < age_at_radiation_start_1 | 
+       (is.na(age_at_radiation_start_1) &
           !is.na(age_at_first_surgery))) &
       
       (age_at_first_surgery < age_at_med_start_1 |
          (is.na(age_at_med_start_1) &
             !is.na(age_at_first_surgery)))          ~ "Surgery",
     
-    (age_at_med_start_1 < age_at_first_radiation | 
-       (is.na(age_at_first_radiation) &
+    (age_at_med_start_1 < age_at_radiation_start_1 | 
+       (is.na(age_at_radiation_start_1) &
           !is.na(age_at_med_start_1))) &
       
       (age_at_med_start_1 < age_at_first_surgery |
          (is.na(age_at_first_surgery) &
             !is.na(age_at_med_start_1)))             ~ "Drugs",
     
-    age_at_med_start_1 == age_at_first_radiation     ~ "Drugs",
+    age_at_med_start_1 == age_at_radiation_start_1     ~ "Drugs",
     age_at_med_start_1 == age_at_first_surgery       ~ "Surgery"
     
-    # (age_at_first_sct < age_at_first_radiation | 
-    #    (is.na(age_at_first_radiation) &
+    # (age_at_first_sct < age_at_radiation_start_1 | 
+    #    (is.na(age_at_radiation_start_1) &
     #       !is.na(age_at_first_sct))) &
     #   
     #   (age_at_first_sct < age_at_first_surgery |
@@ -225,11 +225,19 @@ gyn_data <- clinical_data %>%
     
   )) %>% 
   mutate(age_at_first_treatment = case_when(
-    first_treatment == "Radiation"                  ~ age_at_first_radiation,
+    first_treatment == "Radiation"                  ~ age_at_radiation_start_1,
     first_treatment == "Surgery"                    ~ age_at_first_surgery,
     first_treatment == "Drugs"                      ~ age_at_med_start_1#,
     # first_treatment == "SCT"                        ~ age_at_first_sct
   )) %>% 
+  mutate(had_prior_radiation = case_when(
+    age_at_radiation_start_1 > ever_first_rad_age       ~ "Yes"
+  )) %>% 
+  mutate(treatment_type = case_when(
+    age_at_med_start_1 < age_at_first_surgery                  ~ "Upfront Neoadjuvant",
+    age_at_med_start_1 >= age_at_first_surgery                 ~ "Upfront Surgery"
+  )) %>% 
+  
   # Drugs----
   mutate(received_carboplatin_any_regimen = case_when(
     if_any(any_of(contains("regimen_")), 
@@ -271,7 +279,8 @@ gyn_data <- clinical_data %>%
   mutate(os_event = case_when(
     vital_status == "Alive"                          ~ 0,
     vital_status == "Lost to follow-up"              ~ 0,
-    vital_status == "Dead"                           ~ 1
+    vital_status == "Dead"                           ~ 1,
+    !is.na(vital_status)                             ~ 99
   )) %>% 
   mutate(os_age = coalesce(age_at_death, age_at_last_contact)) %>% 
   mutate(os_time_from_dx_years = os_age - age_at_diagnosis) %>% 
@@ -309,35 +318,35 @@ gyn_data <- clinical_data %>%
   mutate(met_age = coalesce(age_at_metastatic_site, age_at_last_contact)) %>% 
   mutate(met_time_from_dx_years = met_age - age_at_diagnosis) %>% 
   mutate(met_time_from_treatment_years = met_age - age_at_first_treatment) %>% 
-  mutate(time_dx_to_first_treatment_days = (age_at_first_treatment - age_at_diagnosis) * 365)
-
+  mutate(time_dx_to_first_treatment_days = (age_at_first_treatment - age_at_diagnosis) * 365) %>% 
+  mutate(time_blood_to_first_treatment_days = (age_at_first_treatment - germline_collection_age) * 365)
+  
 # All patients who have outcome data but have missing pfs event have unknown data in Outcome raw file
 
 # Save
 write_csv(gyn_data,
           paste0(here::here(), 
-                 "/data/processed data",
-                 "/Ovary and CH data_",
+                 "/data/processed_data",
+                 "/CHinOvary_Data_",
                  str_remove_all(today(), "-"), ".csv"))
 write_rds(gyn_data, 
           paste0(here::here(), 
-                 "/data/processed data",
-                 "/Ovary and CH data_",
+                 "/data/processed_data",
+                 "/CHinOvary_Data_",
                  str_remove_all(today(), "-"), ".rds"))
 
 path_save <- fs::path("", "Volumes", "Gillis_Research",
-                      "Christelle Colin-Leitzinger", "Ovary CH",
-                      "ovary_ch")
+                     "Lab_Data", "CHinOvary")
 write_csv(gyn_data, 
           paste0(path_save, 
-                 "/data/processed data",
-                 "/Ovary and CH data_",
+                 "/ProcessedData",
+                 "/CHinOvary_Data_",
                  str_remove_all(today(), "-"), ".csv"))
 
 write_csv(gyn_data, 
           paste0(path_save, 
-                 "/data/processed data",
-                 "/Ovary and CH data_",
+                 "/ProcessedData",
+                 "/CHinOvary_Data_",
                  str_remove_all(today(), "-"), ".rds"))
 
 path_save <- fs::path("", "Volumes", "Peres_Research",
@@ -346,7 +355,7 @@ path_save <- fs::path("", "Volumes", "Peres_Research",
 write_csv(gyn_data, 
           paste0(path_save, 
                  "/data/processed data",
-                 "/Ovary and CH data_",
+                 "/CHinOvary_Data_",
                  str_remove_all(today(), "-"), ".csv"))
 
 # End create variables
