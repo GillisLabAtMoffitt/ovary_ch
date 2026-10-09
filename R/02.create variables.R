@@ -4,27 +4,21 @@ library(lubridate)
 
 
 ################################################################################# I ### Load data
-path_raw <- fs::path("", "Volumes", "Lab_Gillis",
+path_orien <- fs::path("", "Volumes", "Lab_Gillis",
                      "ORIEN_Avatar", "resources")
-# load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_files.RData")
 
 clinical_data <- 
   read_rds(paste0(
     here::here(), "/data/processed_data",
-    "/ORIEN_data_with_ovarian_sample_20260618.rds")) %>% 
+    "/CHinOvary_CleanedClinicalData_20261009.rds")) %>% 
   janitor::clean_names()
-old_histo <- 
-  read_rds(paste0(
-    here::here(), "/data/processed_data/Oldversion",
-    "/ORIEN_data_with_ovarian_sample_2025-09-04.rds")) %>% 
-  janitor::clean_names() %>% 
-  select(avatar_key, old_histo_bev = histology_behavior, old_histo = histology)
+
 
 ################################################################################# II ### Create new variables
-gyn_data <- clinical_data %>% 
-  mutate(raceeth = factor(raceeth, levels = c("White Non-Hispanic",
-                                                "Black Non-Hispanic",
-                                                "Hispanic, any race"))) %>% 
+ovarian_data <- clinical_data %>% 
+  # mutate(raceeth = factor(raceeth, levels = c("White Non-Hispanic",
+  #                                               "Black Non-Hispanic",
+  #                                               "Hispanic, any race"))) %>% 
   mutate(bmi_cat = case_when(
     bmi_cat == "Underweight" |
       bmi_cat == "Healthy"                         ~ "Underweight - Healthy",
@@ -32,25 +26,6 @@ gyn_data <- clinical_data %>%
   ), bmi_cat = factor(bmi_cat, levels = c("Underweight - Healthy",
                                           "Overweight",
                                           "Obese"))) %>% 
-  mutate(clin_group_stage = case_when(
-    str_detect(clin_group_stage, "IV")                        ~ "4",
-    # should not be any 5 but just in case
-    str_detect(clin_group_stage, "V")                         ~ "5",
-    str_detect(clin_group_stage, "III")                       ~ "3",
-    str_detect(clin_group_stage, "II")                        ~ "2",
-    str_detect(clin_group_stage, "I")                         ~ "1"
-  )) %>% 
-  mutate(path_group_stage = case_when(
-    str_detect(path_group_stage, "IV")                        ~ "4",
-    # should not be any 5 but just in case
-    str_detect(path_group_stage, "V")                         ~ "5",
-    str_detect(path_group_stage, "III")                       ~ "3",
-    str_detect(path_group_stage, "II")                        ~ "2",
-    str_detect(path_group_stage, "I")                         ~ "1"
-  )) %>% 
-  group_by(avatar_key) %>% 
-  mutate(stage = max(clin_group_stage, path_group_stage, na.rm = TRUE)) %>%
-  ungroup() %>% 
   mutate(stage_cat = case_when(
     stage == "1" |
       stage == "2"                                 ~ "1-2",
@@ -58,184 +33,227 @@ gyn_data <- clinical_data %>%
       stage == "4"                                 ~ "3-4",
   ), stage_cat = factor(stage_cat, levels = c("1-2",
                                               "3-4"))) %>% 
-  # Create new var
-  left_join(., old_histo, by = "avatar_key") %>% 
+  # Create histo variables
   mutate(histology_behavior = str_match(histology_behavior, "([1-9]+ (.*))")[,3]) %>% 
-  mutate(old_histo_bev = str_match(old_histo_bev, "([1-9]+ (.*))")[,3]) %>% 
   mutate(histotype = case_when(
     
-    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
-      old_histo == "Adenocarcinoma, NOS"                                 ~ "Endometrioid",
-    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
-      old_histo == "Mixed cell adenocarcinoma"                           ~ "Endometrioid",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Adenocarcinoma, NOS" & 
+      histology_behavior == "Serous cystadenocarcinoma, NOS"             ~ "Serous",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Adenocarcinoma, NOS" & 
+      histology_behavior == "Adenocarcinoma, NOS"                        ~ "Other epithelial",
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS" |
+       primary_diagnosis_site == "Specified parts of peritoneum" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "Serous carcinoma, NOS"                               ~ "Serous",
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS") &
+       histology == "Endometrioid adenocarcinoma, NOS"                   ~ "Endometrioid",
     
-    old_histo_bev == "Serous surface papillary tumor of borderline malignancy" &
-      old_histo == "Serous cystadenoma, borderline malignancy"           ~ "Exclude",
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "Low-grade serous carcinoma"                          ~ "Serous", # LGSOC
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "High-grade serous carcinoma"                         ~ "Serous", # HGSOC
     
-    old_histo_bev == "Serous cystadenocarcinoma, NOS" &
-      old_histo == "Neoplasm, malignant"                                 ~ "Serous",
-    old_histo_bev == "Serous cystadenocarcinoma, NOS" &
-      old_histo == "Neoplasm, malignant"                                 ~ "Serous",
-    old_histo_bev == "Endometrioid adenocarcinoma, NOS" &
-      old_histo == "Other"                                               ~ "Endometrioid",
-    old_histo_bev == "Serous surface papillary carcinoma" &
-      old_histo == "Serous endometrial/tubal intraepithelial carcinoma"  ~ "Serous",
-    old_histo_bev == "Clear cell adenocarcinoma, NOS" &
-      old_histo == "Clear cell adenocarcinofibroma"                      ~ "Clear cell",
-    
-    old_histo == "Serous cystadenocarcinoma, NOS"                        ~ "Serous",
-    old_histo == "Endometrioid adenocarcinoma, NOS"                      ~ "Endometrioid",
-    old_histo == "Papillary serous cystadenocarcinoma"                   ~ "Serous",
-    old_histo == "Clear cell adenocarcinoma, NOS"                        ~ "Clear cell",
-    old_histo == "Serous surface papillary carcinoma"                    ~ "Serous",
-    old_histo == "Mixed cell adenocarcinoma"                             ~ "Other epithelial",
-    old_histo == "Adenocarcinoma, NOS"                                   ~ "Other epithelial",
-    old_histo == "Carcinosarcoma, NOS"                                   ~ "Other epithelial",
-    old_histo == "Mucinous adenocarcinoma"                               ~ "Mucinous",
-    old_histo == "Carcinoma, NOS"                                        ~ "Other epithelial",
-    old_histo == "Mullerian mixed tumor"                                 ~ "Other epithelial",
-    old_histo == "Carcinoma, metastatic, NOS"                            ~ "Other epithelial",
-    old_histo == "Mucinous cystadenocarcinoma, NOS"                  ~ "Mucinous",
-    old_histo == "Neoplasm, malignant"                                  ~ "Exclude",
-    old_histo == "Papillary adenocarcinoma, NOS"                           ~ "Serous",
-    old_histo == "Squamous cell carcinoma, NOS"                           ~ "Other epithelial",
-    old_histo == "Transitional cell carcinoma, NOS"                  ~ "Serous",
-    old_histo == "Adenocarcinoma, intestinal type" &
-      old_histo_bev == "Pseudomyxoma peritonei"                     ~ "Mucinous",
-    old_histo == "Carcinoma, anaplastic, NOS"                           ~ "Other epithelial",
-    old_histo == "Clear cell adenocarcinofibroma"                           ~ "Exclude",
-    old_histo == "Mesodermal mixed tumor"                                      ~ "Other epithelial",
-    old_histo == "Serous endometrial/tubal intraepithelial carcinoma"         ~ "Exclude",
-    old_histo == "Granulosa cell tumor, malignant"                        ~ "Exclude",
-    old_histo == "Serous cystadenoma, borderline malignancy"         ~ "Serous but not invasive so probably exclude?",
-    old_histo == "Sertoli-leydig cell tumor, poorly differentiated"         ~ "Exclude",
-    old_histo == "Sertoli cell carcinoma"                           ~ "Exclude",
-    old_histo == "Adenocarcinoma in situ, NOS"                           ~ "Other epithelial",
-    old_histo == "Large cell carcinoma, NOS"                           ~ "Other epithelial",
-    old_histo == "Small cell carcinoma, NOS"                           ~ "Other epithelial",
-    old_histo == "Mucinous cystic tumor of borderline malignancy"         ~ "Exclude",
-    old_histo == "Other"                                             ~ "Exclude",
-    old_histo == "Papillary carcinoma, NOS"                           ~ "Serous",
-    old_histo == "Sebaceous adenocarcinoma"                           ~ "Exclude",
-    old_histo == "Thecoma, malignant"                                    ~ "Exclude",
-    old_histo == "Dysgerminoma"                                          ~ "Exclude",
-    old_histo == "Mixed germ cell tumor"                                 ~ "Exclude",
-    old_histo == "Steroid cell tumor, malignant"                         ~ "Exclude",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Clear cell adenocarcinoma, NOS"                      ~ "Clear cell",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Clear cell adenocarcinofibroma"                      ~ "Clear cell",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Mixed cell adenocarcinoma"                           ~ "Other epithelial",
+    (primary_diagnosis_site == "Ovary" |
+      primary_diagnosis_site == "Fallopian tube") &
+      histology == "Mullerian mixed tumor"                               ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Mesodermal mixed tumor"                              ~ "Other epithelial",
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "Carcinosarcoma, NOS"                                 ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Carcinoma, NOS"                                      ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Mucinous adenocarcinoma"                             ~ "Mucinous",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Mucinous cystadenocarcinoma, NOS"                    ~ "Mucinous",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Squamous cell carcinoma, NOS"                        ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Transitional cell carcinoma, NOS"                    ~ "Serous",
+    primary_diagnosis_site == "Peritoneum, NOS" &
+      histology == "Adenocarcinoma, NOS"                                 ~ "Other epithelial",
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "Papillary adenocarcinoma, NOS"                       ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Carcinoma, anaplastic, NOS"                          ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Large cell carcinoma, NOS"                           ~ "Other epithelial",
+    primary_diagnosis_site == "Ovary" &
+      histology == "Small cell carcinoma, NOS"                           ~ "Other epithelial",
+        
+    #     
+    # histology == "Serous cystadenocarcinoma, NOS"                        ~ "Serous",
+    # histology == "Papillary serous cystadenocarcinoma"                   ~ "Serous",
+    # histology == "Serous surface papillary carcinoma"                    ~ "Serous",
+    # histology == "Carcinoma, metastatic, NOS"                            ~ "Other epithelial",
+    # histology == "Neoplasm, malignant"                                  ~ "Exclude",
+    # histology == "Adenocarcinoma, intestinal type" &
+    #   histology_behavior == "Pseudomyxoma peritonei"                     ~ "Mucinous",
+    # histology == "Clear cell adenocarcinofibroma"                           ~ "Exclude",
+    # histology == "Serous endometrial/tubal intraepithelial carcinoma"         ~ "Exclude",
+    # histology == "Granulosa cell tumor, malignant"                        ~ "Exclude",
+    # histology == "Serous cystadenoma, borderline malignancy"         ~ "Serous but not invasive so probably exclude?",
+    # histology == "Sertoli-leydig cell tumor, poorly differentiated"         ~ "Exclude",
+    # histology == "Sertoli cell carcinoma"                           ~ "Exclude",
+    # histology == "Adenocarcinoma in situ, NOS"                           ~ "Other epithelial",
+    # 
+    # 
+    # 
+    # 
+    # 
+    # 
+    # 
+    # 
+    # 
+    #   
+    #   histology == "Adenocarcinoma, NOS"                                 ~ "Endometrioid",
+    #   histology == "Mixed cell adenocarcinoma"                           ~ "Endometrioid",
+    # 
+    #   histology == "Serous cystadenoma, borderline malignancy"           ~ "Exclude",
+    # 
+    #   histology == "Neoplasm, malignant"                                 ~ "Serous",
+    #   histology == "Neoplasm, malignant"                                 ~ "Serous",
+    #   histology == "Other"                                               ~ "Endometrioid",
+    #   histology == "Serous endometrial/tubal intraepithelial carcinoma"  ~ "Serous",
+    # 
+    # 
+    # histology == "Mucinous cystic tumor of borderline malignancy"         ~ "Exclude",
+    # histology == "Other"                                             ~ "Exclude",
+    # histology == "Papillary carcinoma, NOS"                           ~ "Serous",
+    # histology == "Sebaceous adenocarcinoma"                           ~ "Exclude",
+    # histology == "Thecoma, malignant"                                    ~ "Exclude",
+    # histology == "Dysgerminoma"                                          ~ "Exclude",
+    # histology == "Mixed germ cell tumor"                                 ~ "Exclude",
+    # histology == "Steroid cell tumor, malignant"                         ~ "Exclude",
     TRUE          ~ "?"
   )) %>% 
   mutate(grade_pathological = str_to_sentence(grade_pathological)) %>% 
   mutate(grade = case_when(
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "Low-grade serous carcinoma"                          ~ "Low", # LGSOC
+    (primary_diagnosis_site == "Ovary" |
+       primary_diagnosis_site == "Peritoneum, NOS" |
+       primary_diagnosis_site == "Fallopian tube") &
+      histology == "High-grade serous carcinoma"                         ~ "High", # HGSOC
     histotype == "Serous" &
       grade_pathological %in% c(
         "Low grade", 
-        "Well differentiated")                         ~ "Low",
+        "Well Differentiated")                                           ~ "Low",
     histotype == "Serous" &
       grade_pathological %in% c(
         "High grade", 
-        "Moderately differentiated",
-        "Poorly differentiated",
-        "Undifferentiated")                            ~ "High",
+        "Moderately Differentiated",
+        "Poorly Differentiated",
+        "Undifferentiated")                                              ~ "High",
     histotype == "Serous" &
       grade_pathological %in% c(
-        "Grade cannot be assessed; unknown",
+        "Grade cannot be assessed; Unknown",
         "Site-specific grade system category",
-        "Unknown/not applicable"
-      )                                                ~ "High",
-    histotype == "Exclude"                             ~ "Exclude"#,
-    # TRUE                                               ~ paste0(histotype, grade_pathological)
+        "Neoadjuvant/First Line Therapy Received",
+        "Unknown/Not Applicable"
+      )                                                                  ~ "High",
+    histotype == "Exclude"                                               ~ "Exclude"#,
+    # TRUE                                                                 ~ paste0(histotype, grade_pathological)
   ), grade = factor(grade, levels = c("Low",
-                                      "High"))) %>% 
+                                      "High"))
+  ) %>% 
   mutate(hgsoc_vs_others = case_when(
     grade == "High"                                    ~ "High-grade serous/carcinosarcoma",
-    histology == "Carcinosarcoma, NOS"                 ~ "High-grade serous/carcinosarcoma",
-    histotype == "Exclude"                             ~ "Exclude",
     !is.na(grade) | 
       !is.na(histotype)                                ~ "Others"
   )) %>% 
+  # select(avatar_key, 
+  #        histology, histology_behavior, new_grade_pathological = grade_pathological,
+  #        histology, histology_behavior, old_grade_pathological,
+  #        histotype_christelle = histotype,
+  #        grade_christelle = grade, hgsoc_vs_others_christelle = hgsoc_vs_others)
   # Age at last contact
-  mutate(is_agelastcontact_last_date = case_when(
+  mutate(is_age_lastcontact_lastdate = case_when(
     age_at_last_contact >= age_at_lab                  ~ "Yes",
     !is.na(age_at_last_contact) & 
       is.na(age_at_lab)                                ~ "Yes",
     age_at_last_contact < age_at_lab                   ~ "No"
   )) %>% 
-  # mutate(age_at_last_contact = case_when(
-  #   is_agelastcontact_last_date == "Yes"            ~ age_at_last_contact,
-  #   is_agelastcontact_last_date == "No"             ~ age_at_lab
+  mutate(is_deathage_last_ = case_when(
+    age_at_death == age_at_last_contact                ~ "Yes",
+    age_at_death > age_at_last_contact                 ~ "Yes",
+    !is.na(age_at_last_contact) & 
+      is.na(age_at_death)                              ~ "Yes",
+    age_at_death < age_at_last_contact                 ~ "No"
+  )) |> 
+  # mutate(age_at_last_contact = case_when( # Not needed
+  #   is_deathage_last_ == "Yes"                        ~ age_at_last_contact,
+  #   is_deathage_last_ == "Same"                       ~ age_at_last_contact,
+  #   is_deathage_last_ == "No"                         ~ age_at_death
+  # )) %>%
+  # Age at first treatment # Already done
+  # mutate(first_treatment = case_when(
+  #   (age_at_radiation_start_1 < age_at_surgery |
+  #      (is.na(age_at_surgery) &
+  #         !is.na(age_at_radiation_start_1))) &
+  #     
+  #     (age_at_radiation_start_1 < age_at_med_start_1 |
+  #        (is.na(age_at_med_start_1) &
+  #           !is.na(age_at_radiation_start_1)))        ~ "Radiation",
+  #   
+  #   (age_at_surgery < age_at_radiation_start_1 | 
+  #      (is.na(age_at_radiation_start_1) &
+  #         !is.na(age_at_surgery))) &
+  #     
+  #     (age_at_surgery < age_at_med_start_1 |
+  #        (is.na(age_at_med_start_1) &
+  #           !is.na(age_at_surgery)))          ~ "Surgery",
+  #   
+  #   (age_at_med_start_1 < age_at_radiation_start_1 | 
+  #      (is.na(age_at_radiation_start_1) &
+  #         !is.na(age_at_med_start_1))) &
+  #     
+  #     (age_at_med_start_1 < age_at_surgery |
+  #        (is.na(age_at_surgery) &
+  #           !is.na(age_at_med_start_1)))             ~ "Drugs",
+  #   
+  #   age_at_med_start_1 == age_at_radiation_start_1     ~ "Drugs",
+  #   age_at_med_start_1 == age_at_surgery       ~ "Surgery"
+  #   
+  #   # (age_at_first_sct < age_at_radiation_start_1 | 
+  #   #    (is.na(age_at_radiation_start_1) &
+  #   #       !is.na(age_at_first_sct))) &
+  #   #   
+  #   #   (age_at_first_sct < age_at_surgery |
+  #   #      (is.na(age_at_surgery) &
+  #   #         !is.na(age_at_first_sct))) &
+  #   #   
+  #   #   (age_at_first_sct < age_at_med_start_1 |
+  #   #      (is.na(age_at_med_start_1) &
+  #   #         !is.na(age_at_first_sct)))             ~ "SCT"
+  #   
   # )) %>% 
-  mutate(is_age_death_last_ = case_when(
-    age_at_death == age_at_last_contact                ~ "Same",
-    age_at_death > age_at_last_contact                 ~ "Yes",
-    !is.na(age_at_last_contact) & 
-      is.na(age_at_death)                              ~ "Yes",
-    age_at_death < age_at_last_contact                 ~ "No"
-  )) %>% 
-  mutate(age_at_last_contact = case_when(
-    is_age_death_last_ == "Yes"                        ~ age_at_last_contact,
-    is_age_death_last_ == "Same"                       ~ age_at_last_contact,
-    is_age_death_last_ == "No"                         ~ age_at_death
-  )) %>%
-  mutate(is_age_death_last = case_when(
-    age_at_death == age_at_last_contact                ~ "Same",
-    age_at_death > age_at_last_contact                 ~ "Yes",
-    !is.na(age_at_last_contact) & 
-      is.na(age_at_death)                              ~ "Yes",
-    age_at_death < age_at_last_contact                 ~ "No"
-  )) %>% 
-  # Age at first treatment
-  mutate(first_treatment = case_when(
-    (age_at_radiation_start_1 < age_at_first_surgery |
-       (is.na(age_at_first_surgery) &
-          !is.na(age_at_radiation_start_1))) &
-      
-      (age_at_radiation_start_1 < age_at_med_start_1 |
-         (is.na(age_at_med_start_1) &
-            !is.na(age_at_radiation_start_1)))        ~ "Radiation",
-    
-    (age_at_first_surgery < age_at_radiation_start_1 | 
-       (is.na(age_at_radiation_start_1) &
-          !is.na(age_at_first_surgery))) &
-      
-      (age_at_first_surgery < age_at_med_start_1 |
-         (is.na(age_at_med_start_1) &
-            !is.na(age_at_first_surgery)))          ~ "Surgery",
-    
-    (age_at_med_start_1 < age_at_radiation_start_1 | 
-       (is.na(age_at_radiation_start_1) &
-          !is.na(age_at_med_start_1))) &
-      
-      (age_at_med_start_1 < age_at_first_surgery |
-         (is.na(age_at_first_surgery) &
-            !is.na(age_at_med_start_1)))             ~ "Drugs",
-    
-    age_at_med_start_1 == age_at_radiation_start_1     ~ "Drugs",
-    age_at_med_start_1 == age_at_first_surgery       ~ "Surgery"
-    
-    # (age_at_first_sct < age_at_radiation_start_1 | 
-    #    (is.na(age_at_radiation_start_1) &
-    #       !is.na(age_at_first_sct))) &
-    #   
-    #   (age_at_first_sct < age_at_first_surgery |
-    #      (is.na(age_at_first_surgery) &
-    #         !is.na(age_at_first_sct))) &
-    #   
-    #   (age_at_first_sct < age_at_med_start_1 |
-    #      (is.na(age_at_med_start_1) &
-    #         !is.na(age_at_first_sct)))             ~ "SCT"
-    
-  )) %>% 
-  mutate(age_at_first_treatment = case_when(
-    first_treatment == "Radiation"                  ~ age_at_radiation_start_1,
-    first_treatment == "Surgery"                    ~ age_at_first_surgery,
-    first_treatment == "Drugs"                      ~ age_at_med_start_1#,
-    # first_treatment == "SCT"                        ~ age_at_first_sct
-  )) %>% 
+  # mutate(age_at_first_treatment = case_when(
+  #   first_treatment == "Radiation"                  ~ age_at_radiation_start_1,
+  #   first_treatment == "Surgery"                    ~ age_at_surgery,
+  #   first_treatment == "Drugs"                      ~ age_at_med_start_1#,
+  #   # first_treatment == "SCT"                        ~ age_at_first_sct
+  # )) %>% 
   mutate(had_prior_radiation = case_when(
     age_at_radiation_start_1 > ever_first_rad_age       ~ "Yes"
-  )) %>% 
-  mutate(treatment_type = case_when(
-    age_at_med_start_1 < age_at_first_surgery                  ~ "Upfront Neoadjuvant",
-    age_at_med_start_1 >= age_at_first_surgery                 ~ "Upfront Surgery"
   )) %>% 
   
   # Drugs----
@@ -260,53 +278,56 @@ gyn_data <- clinical_data %>%
     has_medication_data == "Yes"                    ~ "No"
   )) %>% 
   mutate(received_carboplatin_regimen1 = case_when(
-    str_detect(regimen_drugs_1, "carboplatin")            ~ "Yes",
+    str_detect(regimen_drugname_1, "carboplatin")            ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_any_platin_regimen1 = case_when(
-    str_detect(regimen_drugs_1, "platin")                 ~ "Yes",
+    str_detect(regimen_drugname_1, "platin")                 ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_any_taxel_regimen1 = case_when(
-    str_detect(regimen_drugs_1, "taxel")                  ~ "Yes",
+    str_detect(regimen_drugname_1, "taxel")                  ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
   )) %>%
   mutate(received_bev_regimen1 = case_when(
-    str_detect(regimen_drugs_1, "bevacizumab")            ~ "Yes",
+    str_detect(regimen_drugname_1, "bevacizumab")            ~ "Yes",
     has_medication_data == "Yes"                    ~ "No"
-  )) %>% 
+  )) |> 
   # OS----
   mutate(os_event = case_when(
     vital_status == "Alive"                          ~ 0,
     vital_status == "Lost to follow-up"              ~ 0,
     vital_status == "Dead"                           ~ 1,
+    has_os_data == "Yes"                             ~ 98,
     !is.na(vital_status)                             ~ 99
   )) %>% 
   mutate(os_age = coalesce(age_at_death, age_at_last_contact)) %>% 
   mutate(os_time_from_dx_years = os_age - age_at_diagnosis) %>% 
   mutate(os_time_from_treatment_years = os_age - age_at_first_treatment) %>% 
   # RFS
-  mutate(rfs_event = pfs_event) %>% 
-  mutate(rfs_age = pfs_age) %>% 
+  mutate(rfs_event = case_when(
+    !is.na(prog_recur_ind)                          ~ 1,
+    has_outcomes_data == "Yes" &
+      is.na(prog_recur_ind)                         ~ 0
+  )) %>% 
+  mutate(rfs_age = age_at_prog_recur) %>% 
   mutate(rfs_time_from_dx_years = rfs_age - age_at_diagnosis) %>% 
-  mutate(rfs_time_from_treatment_years = rfs_age - age_at_first_treatment) %>% 
+  mutate(rfs_time_from_treatment_years = rfs_age - age_at_first_treatment) |> 
   # PFS - need to add death----
   # If no PFS data (event/age), I don't include their death and will be NA
   # as we don't know if there was a progression before
-  mutate(pfs_age = case_when(
-    pfs_event == 0 &
-      os_event == 1                                 ~ os_age,
-    
-    pfs_event == 1                                  ~ pfs_age,
-    
-    pfs_event == 0                                  ~ pfs_age
-  )) %>%
   mutate(pfs_event = case_when(
-    pfs_event == 0 &
+    rfs_event == 1                                  ~ 1,
+    rfs_event == 0 &
       os_event == 1                                 ~ 1,
-    pfs_event == 1                                  ~ 1,
-    pfs_event == 0                                  ~ 0
+    rfs_event == 0                                  ~ 0
     # !is.na(pfs_event)                               ~ pfs_event,
+  )) %>%
+  mutate(pfs_age = case_when(
+    rfs_event == 1                                  ~ rfs_age,
+    rfs_event == 0 &
+      os_event == 1                                 ~ os_age,
+    rfs_event == 0                                  ~ rfs_age
   )) %>%
   mutate(pfs_time_from_dx_years = pfs_age - age_at_diagnosis) %>% 
   mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment) %>% 
@@ -324,38 +345,38 @@ gyn_data <- clinical_data %>%
 # All patients who have outcome data but have missing pfs event have unknown data in Outcome raw file
 
 # Save
-write_csv(gyn_data,
+write_csv(ovarian_data,
           paste0(here::here(), 
                  "/data/processed_data",
-                 "/CHinOvary_Data_",
+                 "/CHinOvary_FinalClinicalData_",
                  str_remove_all(today(), "-"), ".csv"))
-write_rds(gyn_data, 
+write_rds(ovarian_data, 
           paste0(here::here(), 
                  "/data/processed_data",
-                 "/CHinOvary_Data_",
+                 "/CHinOvary_FinalClinicalData_",
                  str_remove_all(today(), "-"), ".rds"))
 
-path_save <- fs::path("", "Volumes", "Gillis_Research",
-                     "Lab_Data", "CHinOvary")
-write_csv(gyn_data, 
-          paste0(path_save, 
+path_gillis <- fs::path("", "Volumes", "Gillis_Research",
+                        "Lab_Data", "CHinOvary")
+write_csv(ovarian_data, 
+          paste0(path_gillis, 
                  "/ProcessedData",
-                 "/CHinOvary_Data_",
+                 "/CHinOvary_FinalClinicalData_",
                  str_remove_all(today(), "-"), ".csv"))
 
-write_csv(gyn_data, 
-          paste0(path_save, 
+write_csv(ovarian_data, 
+          paste0(path_gillis, 
                  "/ProcessedData",
-                 "/CHinOvary_Data_",
+                 "/CHinOvary_FinalClinicalData_",
                  str_remove_all(today(), "-"), ".rds"))
 
-path_save <- fs::path("", "Volumes", "Peres_Research",
-                      "ORIEN analysis", "Ovary CH")
+path_peres <- fs::path("", "Volumes", "Peres_Research",
+                       "ORIEN analysis", "Ovary CH")
 
-write_csv(gyn_data, 
-          paste0(path_save, 
+write_csv(ovarian_data, 
+          paste0(path_peres, 
                  "/data/processed data",
-                 "/CHinOvary_Data_",
+                 "/CHinOvary_FinalClinicalData_",
                  str_remove_all(today(), "-"), ".csv"))
 
 # End create variables
